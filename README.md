@@ -273,9 +273,9 @@ All endpoints require two custom headers (except `/erp/health`):
 | Branch | Purpose |
 |--------|---------|
 | `main` | Protected. Production-ready code only. |
-| `dev1/` | Dev 1 — Core Engine |
-| `dev2/` | Dev 2 — Xero Adapter |
-| `dev3/` | Dev 3 — QBO Adapter |
+| `dev1/` | Mithilesh Kolhapurkar — Core Engine |
+| `dev2/` | Ankita Patil — Xero Adapter |
+| `dev3/` | Samreen Shaikh — QBO Adapter |
 
 PRs from `dev*/` branches must be reviewed before merging to `main`.
 
