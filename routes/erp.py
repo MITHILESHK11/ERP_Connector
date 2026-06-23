@@ -4,35 +4,23 @@ from config.settings import get_settings
 from utils.errors import AppError
 from utils.rate_limiter import check_rate_limit
 from utils.logger import correlation_id_var, get_logger
+from adapters import get_adapter as _registry_get_adapter
 
 router = APIRouter(prefix="/erp")
 logger = get_logger("routes.erp")
 
-# Dynamic adapter importer/registry to avoid import errors before Dev 2/3 implement them
+
 def get_adapter():
-    settings = get_settings()
-    if settings.ERP_TYPE == "xero":
-        try:
-            from adapters.xero import XeroAdapter
-            return XeroAdapter()
-        except (ImportError, AttributeError, TypeError):
-            raise AppError(
-                "ADAPTER_NOT_IMPLEMENTED",
-                "Xero adapter has not been implemented yet.",
-                501
-            )
-    elif settings.ERP_TYPE == "quickbooks":
-        try:
-            from adapters.qbo import QBOAdapter
-            return QBOAdapter()
-        except (ImportError, AttributeError, TypeError):
-            raise AppError(
-                "ADAPTER_NOT_IMPLEMENTED",
-                "QuickBooks Online adapter has not been implemented yet.",
-                501
-            )
-    else:
-        raise AppError("INVALID_CONFIG", f"Unsupported ERP_TYPE: {settings.ERP_TYPE}", 500)
+    """
+    FastAPI dependency that delegates to the canonical adapter registry.
+    Translates registry-level errors into structured HTTP responses.
+    """
+    try:
+        return _registry_get_adapter()
+    except NotImplementedError as exc:
+        raise AppError("ADAPTER_NOT_IMPLEMENTED", str(exc), 501)
+    except ValueError as exc:
+        raise AppError("INVALID_CONFIG", str(exc), 500)
 
 
 async def get_auth_headers(
