@@ -256,27 +256,15 @@ All endpoints require two custom headers (except `/erp/health`):
 
 ## Architecture
 
-```
-Internal Service
-      │
-      │  X-ERP-Token, X-ERP-Tenant-Id
-      ▼
-┌─────────────────────────────────┐
-│        ERP Connector            │
-│                                 │
-│  main.py (CORS, Correlation ID) │
-│  routes/erp.py  (12 endpoints)  │
-│  adapters/__init__.py (registry)│
-│         ┌──────────┐            │
-│         │ ERP_TYPE │            │
-│         └────┬─────┘            │
-│         xero │ quickbooks       │
-│      ┌───────┴───────┐          │
-│  XeroAdapter     QBOAdapter     │
-└─────────────────────────────────┘
-      │                  │
- api.xero.com    quickbooks.api.intuit.com
-```
+![ERP Connector Architecture Diagram](docs/images/erp_connector_diagram_1.jpg)
+
+**Flow summary:**
+1. **Calling Services** (Variance Analysis Engine, Anomaly Detection, etc.) make REST calls with `X-ERP-Token` + `X-ERP-Tenant-Id` headers.
+2. **Entry Layer** validates headers — missing/expired token returns `TOKEN_EXPIRED` immediately.
+3. **ERP Router** reads `ERP_TYPE` from config and routes to the correct adapter.
+4. **Rate Limiter** (token bucket per `tenant_id`) checks limits before any API call — Xero: 60/min, QBO: 500/min. Requests are queued on breach, never dropped.
+5. **Adapter** (Xero or QBO) builds the ERP-specific API call, handles pagination (loops until < 1000 records per page).
+6. **Response Pipeline** — on error, translates to a clean `{ error, message, erp, timestamp }` response. On success, maps ERP fields to the common normalised schema and returns the result.
 
 ---
 
