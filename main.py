@@ -84,6 +84,8 @@ class CorrelationIDMiddleware(BaseHTTPMiddleware):
 # ---------------------------------------------------------------------------
 # FastAPI application
 # ---------------------------------------------------------------------------
+import yaml
+
 app = FastAPI(
     title="ERP Connector",
     version=settings.APP_VERSION,
@@ -92,6 +94,20 @@ app = FastAPI(
     redoc_url="/erp/redoc",
     lifespan=lifespan,
 )
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    try:
+        with open("openapi/openapi.yaml", "r") as f:
+            openapi_schema = yaml.safe_load(f)
+        app.openapi_schema = openapi_schema
+        return app.openapi_schema
+    except Exception as exc:
+        logger.error(f"Failed to load custom openapi.yaml: {exc}")
+        return {}
+
+app.openapi = custom_openapi
 
 # CORS
 app.add_middleware(

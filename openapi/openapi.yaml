@@ -1,0 +1,1072 @@
+openapi: 3.0.3
+info:
+  title: ERP Connector API
+  description: Stateless REST API wrapper for Xero and QuickBooks Online (QBO)
+  version: 1.0.0
+servers:
+  - url: http://localhost:8000
+    description: Local Development Server
+
+paths:
+  /erp/health:
+    get:
+      summary: Liveness check
+      description: Returns service status, active ERP adapter type, and version. Does not hit the upstream ERP.
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - erp
+                  - version
+                  - timestamp
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  erp:
+                    type: string
+                    example: xero
+                  version:
+                    type: string
+                    example: 1.0.0
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: "2026-06-08T10:34:22Z"
+
+  /erp/invoices:
+    get:
+      summary: List sales invoices
+      description: Retrieve a list of normalized invoices from the active ERP.
+      parameters:
+        - $ref: "#/components/parameters/X-ERP-Token"
+        - $ref: "#/components/parameters/X-ERP-Tenant-Id"
+        - name: from
+          in: query
+          description: ISO 8601 start date (YYYY-MM-DD)
+          required: false
+          schema:
+            type: string
+            format: date
+            example: "2026-01-01"
+        - name: to
+          in: query
+          description: ISO 8601 end date (YYYY-MM-DD)
+          required: false
+          schema:
+            type: string
+            format: date
+            example: "2026-06-30"
+        - name: status
+          in: query
+          description: Filter by normalized invoice status
+          required: false
+          schema:
+            type: string
+            enum: [draft, authorised, paid, voided]
+            example: paid
+      responses:
+        "200":
+          description: Successful retrieval
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - erp
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  erp:
+                    type: string
+                    example: xero
+                  correlationId:
+                    type: string
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  count:
+                    type: integer
+                    example: 1
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NormalizedInvoice"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "502":
+          $ref: "#/components/responses/Error502"
+        "504":
+          $ref: "#/components/responses/Error504"
+
+    post:
+      summary: Create a sales invoice
+      description: Create a new sales invoice in the active ERP after validating request schemas.
+      parameters:
+        - $ref: "#/components/parameters/X-ERP-Token"
+        - $ref: "#/components/parameters/X-ERP-Tenant-Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInvoiceRequest"
+      responses:
+        "201":
+          description: Invoice created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - erp
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  erp:
+                    type: string
+                    example: xero
+                  correlationId:
+                    type: string
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  data:
+                    $ref: "#/components/schemas/NormalizedInvoice"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "502":
+          $ref: "#/components/responses/Error502"
+        "504":
+          $ref: "#/components/responses/Error504"
+
+  /erp/invoices/{invoice_id}:
+    get:
+      summary: Get an invoice by ID
+      description: Retrieve a single normalized invoice by its unique ID.
+      parameters:
+        - $ref: "#/components/parameters/X-ERP-Token"
+        - $ref: "#/components/parameters/X-ERP-Tenant-Id"
+        - name: invoice_id
+          in: path
+          required: true
+          description: The unique invoice ID
+          schema:
+            type: string
+            example: "inv-12345"
+      responses:
+        "200":
+          description: Successful retrieval
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - erp
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  erp:
+                    type: string
+                    example: xero
+                  correlationId:
+                    type: string
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  data:
+                    $ref: "#/components/schemas/NormalizedInvoice"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "502":
+          $ref: "#/components/responses/Error502"
+        "504":
+          $ref: "#/components/responses/Error504"
+
+  /erp/bills:
+    get:
+      summary: List vendor bills
+      description: Retrieve a list of normalized bills from the active ERP.
+      parameters:
+        - $ref: "#/components/parameters/X-ERP-Token"
+        - $ref: "#/components/parameters/X-ERP-Tenant-Id"
+        - name: from
+          in: query
+          description: ISO 8601 start date (YYYY-MM-DD)
+          required: false
+          schema:
+            type: string
+            format: date
+            example: "2026-01-01"
+        - name: to
+          in: query
+          description: ISO 8601 end date (YYYY-MM-DD)
+          required: false
+          schema:
+            type: string
+            format: date
+            example: "2026-06-30"
+      responses:
+        "200":
+          description: Successful retrieval
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - erp
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  erp:
+                    type: string
+                    example: xero
+                  correlationId:
+                    type: string
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  count:
+                    type: integer
+                    example: 1
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NormalizedBill"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "502":
+          $ref: "#/components/responses/Error502"
+        "504":
+          $ref: "#/components/responses/Error504"
+
+    post:
+      summary: Create a vendor bill
+      description: Create a new vendor bill in the active ERP.
+      parameters:
+        - $ref: "#/components/parameters/X-ERP-Token"
+        - $ref: "#/components/parameters/X-ERP-Tenant-Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBillRequest"
+      responses:
+        "201":
+          description: Bill created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - erp
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  erp:
+                    type: string
+                    example: xero
+                  correlationId:
+                    type: string
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  data:
+                    $ref: "#/components/schemas/NormalizedBill"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "502":
+          $ref: "#/components/responses/Error502"
+        "504":
+          $ref: "#/components/responses/Error504"
+
+  /erp/bills/{bill_id}:
+    get:
+      summary: Get a vendor bill by ID
+      description: Retrieve a single normalized bill by its unique ID.
+      parameters:
+        - $ref: "#/components/parameters/X-ERP-Token"
+        - $ref: "#/components/parameters/X-ERP-Tenant-Id"
+        - name: bill_id
+          in: path
+          required: true
+          description: The unique bill ID
+          schema:
+            type: string
+            example: "bill-999"
+      responses:
+        "200":
+          description: Successful retrieval
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - erp
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  erp:
+                    type: string
+                    example: xero
+                  correlationId:
+                    type: string
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  data:
+                    $ref: "#/components/schemas/NormalizedBill"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "502":
+          $ref: "#/components/responses/Error502"
+        "504":
+          $ref: "#/components/responses/Error504"
+
+  /erp/contacts:
+    get:
+      summary: List contacts filtered by type
+      description: Retrieve a list of contacts from the active ERP.
+      parameters:
+        - $ref: "#/components/parameters/X-ERP-Token"
+        - $ref: "#/components/parameters/X-ERP-Tenant-Id"
+        - name: type
+          in: query
+          required: false
+          description: Filter contacts by customer or supplier
+          schema:
+            type: string
+            enum: [customer, supplier]
+            example: customer
+      responses:
+        "200":
+          description: Successful retrieval
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - erp
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  erp:
+                    type: string
+                    example: xero
+                  correlationId:
+                    type: string
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  count:
+                    type: integer
+                    example: 1
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NormalizedContact"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "502":
+          $ref: "#/components/responses/Error502"
+        "504":
+          $ref: "#/components/responses/Error504"
+
+    post:
+      summary: Create a contact
+      description: Create a new contact (customer or vendor) in the active ERP.
+      parameters:
+        - $ref: "#/components/parameters/X-ERP-Token"
+        - $ref: "#/components/parameters/X-ERP-Tenant-Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateContactRequest"
+      responses:
+        "201":
+          description: Contact created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - erp
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  erp:
+                    type: string
+                    example: xero
+                  correlationId:
+                    type: string
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  data:
+                    $ref: "#/components/schemas/NormalizedContact"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "502":
+          $ref: "#/components/responses/Error502"
+        "504":
+          $ref: "#/components/responses/Error504"
+
+  /erp/contacts/{contact_id}:
+    get:
+      summary: Get a contact by ID
+      description: Retrieve a single normalized contact by its unique ID.
+      parameters:
+        - $ref: "#/components/parameters/X-ERP-Token"
+        - $ref: "#/components/parameters/X-ERP-Tenant-Id"
+        - name: contact_id
+          in: path
+          required: true
+          description: The unique contact ID
+          schema:
+            type: string
+            example: "cont-111"
+      responses:
+        "200":
+          description: Successful retrieval
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - erp
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  erp:
+                    type: string
+                    example: xero
+                  correlationId:
+                    type: string
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  data:
+                    $ref: "#/components/schemas/NormalizedContact"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "502":
+          $ref: "#/components/responses/Error502"
+        "504":
+          $ref: "#/components/responses/Error504"
+
+  /erp/accounts:
+    get:
+      summary: Fetch the chart of accounts
+      description: Retrieve list of General Ledger accounts from the active ERP.
+      parameters:
+        - $ref: "#/components/parameters/X-ERP-Token"
+        - $ref: "#/components/parameters/X-ERP-Tenant-Id"
+      responses:
+        "200":
+          description: Successful retrieval
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - erp
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  erp:
+                    type: string
+                    example: xero
+                  correlationId:
+                    type: string
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  count:
+                    type: integer
+                    example: 1
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NormalizedAccount"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "502":
+          $ref: "#/components/responses/Error502"
+        "504":
+          $ref: "#/components/responses/Error504"
+
+  /erp/payments:
+    post:
+      summary: Record a payment
+      description: Record a payment transaction against an invoice or vendor bill in the ERP.
+      parameters:
+        - $ref: "#/components/parameters/X-ERP-Token"
+        - $ref: "#/components/parameters/X-ERP-Tenant-Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordPaymentRequest"
+      responses:
+        "201":
+          description: Payment recorded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - erp
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  erp:
+                    type: string
+                    example: xero
+                  correlationId:
+                    type: string
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  data:
+                    type: object
+                    required:
+                      - payment_id
+                      - status
+                    properties:
+                      payment_id:
+                        type: string
+                        example: "pay-7777"
+                      status:
+                        type: string
+                        example: "success"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "502":
+          $ref: "#/components/responses/Error502"
+        "504":
+          $ref: "#/components/responses/Error504"
+
+components:
+  parameters:
+    X-ERP-Token:
+      name: X-ERP-Token
+      in: header
+      required: true
+      description: Access token prefixed with Bearer or raw OAuth access token
+      schema:
+        type: string
+        example: "Bearer eyJhbGciOiJSUzI1Ni..."
+    X-ERP-Tenant-Id:
+      name: X-ERP-Tenant-Id
+      in: header
+      required: true
+      description: Upstream ERP organisation or tenant ID
+      schema:
+        type: string
+        example: "tenant-12345"
+
+  responses:
+    Error400:
+      description: Invalid request parameter or body validation failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            error: INVALID_REQUEST
+            message: "line_items -> 0 -> quantity: Input should be greater than 0"
+            erp: xero
+            timestamp: "2026-06-08T10:34:22Z"
+    Error401:
+      description: The access token has expired or is invalid
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            error: TOKEN_EXPIRED
+            message: "Access token has expired. Please refresh and retry."
+            erp: xero
+            timestamp: "2026-06-08T10:34:22Z"
+    Error404:
+      description: The resource requested was not found on the upstream ERP
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            error: NOT_FOUND
+            message: "Resource 'GET /invoices/inv-12345' not found."
+            erp: xero
+            timestamp: "2026-06-08T10:34:22Z"
+    Error429:
+      description: Centralized tenant rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            error: RATE_LIMIT_TIMEOUT
+            message: "The request to the ERP service timed out due to rate limiting."
+            erp: xero
+            timestamp: "2026-06-08T10:34:22Z"
+    Error502:
+      description: Upstream ERP service is offline or returned a server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            error: ERP_UNAVAILABLE
+            message: "The upstream ERP service is unavailable."
+            erp: xero
+            timestamp: "2026-06-08T10:34:22Z"
+    Error504:
+      description: The request to the upstream ERP service timed out
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            error: ERP_TIMEOUT
+            message: "The request to the upstream ERP service timed out."
+            erp: xero
+            timestamp: "2026-06-08T10:34:22Z"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - error
+        - message
+        - erp
+        - timestamp
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+          example: TOKEN_EXPIRED
+        message:
+          type: string
+          example: "Access token has expired. Please refresh and retry."
+        erp:
+          type: string
+          example: xero
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-06-08T10:34:22Z"
+
+    NormalizedInvoice:
+      type: object
+      required:
+        - id
+        - reference_number
+        - date
+        - due_date
+        - amount
+        - currency
+        - status
+        - contact_id
+        - line_items
+      properties:
+        id:
+          type: string
+          example: "inv-12345"
+        reference_number:
+          type: string
+          example: "INV-2026-001"
+        date:
+          type: string
+          format: date
+          example: "2026-06-08"
+        due_date:
+          type: string
+          format: date
+          example: "2026-07-08"
+        amount:
+          type: integer
+          description: Total total amount in smallest currency unit
+          example: 12000
+        currency:
+          type: string
+          example: "USD"
+        status:
+          type: string
+          enum: [draft, authorised, paid, voided]
+          example: authorised
+        contact_id:
+          type: string
+          example: "cont-456"
+        line_items:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvoiceLineItem"
+
+    InvoiceLineItem:
+      type: object
+      required:
+        - description
+        - quantity
+        - unit_amount
+        - account_code
+      properties:
+        description:
+          type: string
+          example: "Consulting fees"
+        quantity:
+          type: number
+          example: 1.5
+        unit_amount:
+          type: integer
+          example: 8000
+        account_code:
+          type: string
+          example: "200"
+
+    NormalizedBill:
+      type: object
+      required:
+        - id
+        - bill_number
+        - date
+        - due_date
+        - amount
+        - currency
+        - status
+        - supplier_id
+        - line_items
+      properties:
+        id:
+          type: string
+          example: "bill-9999"
+        bill_number:
+          type: string
+          example: "BILL-2026-99"
+        date:
+          type: string
+          format: date
+          example: "2026-06-08"
+        due_date:
+          type: string
+          format: date
+          example: "2026-07-08"
+        amount:
+          type: integer
+          example: 25000
+        currency:
+          type: string
+          example: "USD"
+        status:
+          type: string
+          enum: [draft, authorised, paid, voided]
+          example: paid
+        supplier_id:
+          type: string
+          example: "supp-888"
+        line_items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillLineItem"
+
+    BillLineItem:
+      type: object
+      required:
+        - description
+        - quantity
+        - unit_amount
+        - account_code
+      properties:
+        description:
+          type: string
+          example: "Office chairs"
+        quantity:
+          type: number
+          example: 5.0
+        unit_amount:
+          type: integer
+          example: 5000
+        account_code:
+          type: string
+          example: "500"
+
+    NormalizedContact:
+      type: object
+      required:
+        - id
+        - name
+        - type
+      properties:
+        id:
+          type: string
+          example: "cont-1234"
+        name:
+          type: string
+          example: "Acme Corp"
+        email:
+          type: string
+          format: email
+          example: "info@acme.com"
+        phone:
+          type: string
+          example: "+1-555-0199"
+        type:
+          type: string
+          enum: [customer, supplier]
+          example: customer
+        address:
+          type: string
+          example: "123 Main St, Springfield"
+
+    NormalizedAccount:
+      type: object
+      required:
+        - id
+        - code
+        - name
+        - type
+      properties:
+        id:
+          type: string
+          example: "acct-555"
+        code:
+          type: string
+          example: "200"
+        name:
+          type: string
+          example: "Sales Income"
+        type:
+          type: string
+          example: "revenue"
+        tax_type:
+          type: string
+          example: "OUTPUT"
+        currency_code:
+          type: string
+          example: "USD"
+
+    CreateInvoiceRequest:
+      type: object
+      required:
+        - contact_id
+        - date
+        - due_date
+        - currency
+        - line_items
+      properties:
+        contact_id:
+          type: string
+          example: "cont-456"
+        date:
+          type: string
+          format: date
+          example: "2026-06-08"
+        due_date:
+          type: string
+          format: date
+          example: "2026-07-08"
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          example: "USD"
+        line_items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/LineItem"
+
+    CreateBillRequest:
+      type: object
+      required:
+        - supplier_id
+        - date
+        - due_date
+        - currency
+        - line_items
+      properties:
+        supplier_id:
+          type: string
+          example: "supp-888"
+        date:
+          type: string
+          format: date
+          example: "2026-06-08"
+        due_date:
+          type: string
+          format: date
+          example: "2026-07-08"
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          example: "USD"
+        line_items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/LineItem"
+
+    LineItem:
+      type: object
+      required:
+        - description
+        - quantity
+        - unit_amount
+        - account_code
+      properties:
+        description:
+          type: string
+          minLength: 1
+          example: "Development work"
+        quantity:
+          type: number
+          minimum: 0.0001
+          example: 10.0
+        unit_amount:
+          type: integer
+          minimum: 1
+          example: 15000
+        account_code:
+          type: string
+          example: "200"
+        tax_type:
+          type: string
+          example: "OUTPUT"
+
+    CreateContactRequest:
+      type: object
+      required:
+        - name
+        - type
+      properties:
+        name:
+          type: string
+          example: "John Doe"
+        email:
+          type: string
+          format: email
+          example: "john@example.com"
+        phone:
+          type: string
+          example: "555-666-7777"
+        type:
+          type: string
+          enum: [customer, supplier]
+          example: supplier
+
+    RecordPaymentRequest:
+      type: object
+      required:
+        - invoice_id
+        - amount
+        - date
+        - account_code
+      properties:
+        invoice_id:
+          type: string
+          example: "inv-12345"
+        amount:
+          type: integer
+          minimum: 1
+          example: 5000
+        date:
+          type: string
+          format: date
+          example: "2026-06-08"
+        account_code:
+          type: string
+          example: "120"
