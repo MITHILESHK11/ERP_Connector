@@ -6,7 +6,8 @@ from utils.errors import (
     raise_not_found,
     raise_invalid_request,
     raise_erp_unavailable,
-    raise_erp_timeout
+    raise_erp_timeout,
+    ERPConnectorError
 )
 from utils.pagination import fetch_all_pages
 
@@ -37,29 +38,50 @@ class QBOHttpClient:
         """Run a QueryService SQL-like query. Returns full parsed JSON response."""
         url = f"{self.base_url}/query"
         params = {"query": sql, "minorversion": QBO_MINOR_VERSION}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url, headers=self.headers, params=params)
-        self._check_response(response)
-        return response.json()
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, headers=self.headers, params=params)
+            self._check_response(response)
+            return response.json()
+        except httpx.TimeoutException:
+            logger.error(f"QBO request timed out for realm_id={self.realm_id}")
+            raise_erp_timeout("quickbooks")
+        except httpx.RequestError as exc:
+            logger.error(f"QBO network error: {exc} realm_id={self.realm_id}")
+            raise_erp_unavailable("quickbooks")
 
     async def get_entity(self, entity: str, entity_id: str) -> dict:
         """GET a single entity by ID."""
         url = f"{self.base_url}/{entity}/{entity_id}"
         params = {"minorversion": QBO_MINOR_VERSION}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url, headers=self.headers, params=params)
-        self._check_response(response)
-        return response.json()
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, headers=self.headers, params=params)
+            self._check_response(response)
+            return response.json()
+        except httpx.TimeoutException:
+            logger.error(f"QBO request timed out for realm_id={self.realm_id}")
+            raise_erp_timeout("quickbooks")
+        except httpx.RequestError as exc:
+            logger.error(f"QBO network error: {exc} realm_id={self.realm_id}")
+            raise_erp_unavailable("quickbooks")
 
     async def post_entity(self, entity: str, body: dict) -> dict:
         """POST to create OR update an entity. QBO uses POST for both."""
         url = f"{self.base_url}/{entity}"
         params = {"minorversion": QBO_MINOR_VERSION}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, headers=self.headers, 
-                                          json=body, params=params)
-        self._check_response(response)
-        return response.json()
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, headers=self.headers, 
+                                              json=body, params=params)
+            self._check_response(response)
+            return response.json()
+        except httpx.TimeoutException:
+            logger.error(f"QBO request timed out for realm_id={self.realm_id}")
+            raise_erp_timeout("quickbooks")
+        except httpx.RequestError as exc:
+            logger.error(f"QBO network error: {exc} realm_id={self.realm_id}")
+            raise_erp_unavailable("quickbooks")
 
     def _check_response(self, response: httpx.Response) -> None:
         """
@@ -78,9 +100,23 @@ class QBOHttpClient:
         elif response.status_code == 404:
             raise_not_found("quickbooks", "entity")
         elif response.status_code == 400:
-            raise_invalid_request("quickbooks", "Bad request — check field values and SyncToken")
+            try:
+                body = response.json()
+                fault = body.get("Fault", {})
+                error_list = fault.get("Error", [{}])
+                if error_list:
+                    error_code = error_list[0].get("code", "")
+                    if error_code == "5010":
+                        raise_invalid_request(
+                            "quickbooks",
+                            "Version conflict — record was updated by another process. Retry."
+                        )
+            except ERPConnectorError:
+                raise
+            except Exception:
+                pass
+            raise_invalid_request("quickbooks", "Bad request — check field values")
         elif response.status_code == 429:
-            # Should be handled by rate limiter — log warning
             logger.warning(f"QBO 429 reached adapter for realm_id={self.realm_id}")
             from utils.errors import raise_rate_limit_timeout
             raise_rate_limit_timeout("quickbooks")
@@ -88,6 +124,7 @@ class QBOHttpClient:
             raise_erp_unavailable("quickbooks")
         else:
             raise_erp_unavailable("quickbooks")
+
 
 
 def extract_query_results(response: dict, entity_name: str) -> list:
@@ -442,6 +479,8 @@ class QBOAdapter(BaseERPAdapter):
             raw = response.get("Customer")
             if raw:
                 return normalize_qbo_customer(raw)
+        except ERPConnectorError:
+            raise
         except Exception:
             pass
             
@@ -451,6 +490,8 @@ class QBOAdapter(BaseERPAdapter):
             raw = response.get("Vendor")
             if raw:
                 return normalize_qbo_vendor(raw)
+        except ERPConnectorError:
+            raise
         except Exception:
             pass
             

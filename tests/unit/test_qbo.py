@@ -310,3 +310,34 @@ async def test_update_invoice():
         assert result["due_date"] == "2026-09-30"
 
 
+def test_check_response_sync_token_conflict():
+    import httpx
+    from adapters.qbo import QBOHttpClient
+    from utils.errors import ERPConnectorError
+    
+    client = QBOHttpClient("token", "123")
+    
+    response = httpx.Response(
+        status_code=400,
+        json={
+            "Fault": {
+                "Error": [
+                    {
+                        "Message": "Object Version Conflict",
+                        "Detail": "An updated version of this object is available.",
+                        "code": "5010"
+                    }
+                ],
+                "type": "ValidationFault"
+            }
+        }
+    )
+    
+    with pytest.raises(ERPConnectorError) as exc_info:
+        client._check_response(response)
+        
+    assert exc_info.value.error_code == "INVALID_REQUEST"
+    assert "Version conflict" in exc_info.value.message
+
+
+
