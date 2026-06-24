@@ -181,6 +181,112 @@ def normalize_qbo_invoice(raw: dict) -> dict:
     }
 
 
+def format_qbo_address(addr_dict: dict | None) -> str | None:
+    if not addr_dict:
+        return None
+    parts = []
+    for key in ["Line1", "Line2", "Line3", "City", "CountrySubDivisionCode", "PostalCode"]:
+        val = addr_dict.get(key)
+        if val:
+            parts.append(str(val).strip())
+    return ", ".join(parts) if parts else None
+
+
+def normalize_qbo_bill(raw: dict) -> dict:
+    """
+    Convert a raw QBO Bill dict to our normalised schema.
+    """
+    def derive_status(r):
+        balance = float(r.get("Balance") or 0.0)
+        if balance == 0.0:
+            return "paid"
+        return "authorised"
+    
+    line_items = []
+    for line in raw.get("Line", []):
+        if line.get("DetailType") == "AccountBasedExpenseLineDetail":
+            detail = line.get("AccountBasedExpenseLineDetail", {})
+            line_items.append({
+                "description": detail.get("AccountRef", {}).get("name", ""),
+                "quantity": float(detail.get("Qty") or 1.0),
+                "unit_amount": int(round(float(line.get("Amount") or 0.0) * 100)),
+                "account_code": detail.get("AccountRef", {}).get("value", "")
+            })
+            
+    total_float = float(raw.get("TotalAmt") or 0.0)
+    amount = int(round(total_float * 100))
+    
+    ref_num = raw.get("DocNumber") or raw.get("Id")
+    
+    return {
+        "id": raw.get("Id"),
+        "bill_number": ref_num,
+        "date": raw.get("TxnDate"),
+        "due_date": raw.get("DueDate"),
+        "amount": amount,
+        "currency": raw.get("CurrencyRef", {}).get("value", "USD"),
+        "status": derive_status(raw),
+        "supplier_id": raw.get("VendorRef", {}).get("value"),
+        "line_items": line_items,
+    }
+
+
+def normalize_qbo_customer(raw: dict) -> dict:
+    """
+    QBO Customer → NormalizedContact
+    """
+    email = raw.get("PrimaryEmailAddr", {}).get("Address") if raw.get("PrimaryEmailAddr") else None
+    phone = raw.get("PrimaryPhone", {}).get("FreeFormNumber") if raw.get("PrimaryPhone") else None
+    address = format_qbo_address(raw.get("BillAddr"))
+    
+    return {
+        "id": raw.get("Id"),
+        "name": raw.get("DisplayName", ""),
+        "email": email,
+        "phone": phone,
+        "type": "customer",
+        "address": address
+    }
+
+
+def normalize_qbo_vendor(raw: dict) -> dict:
+    """
+    QBO Vendor → NormalizedContact
+    """
+    email = raw.get("PrimaryEmailAddr", {}).get("Address") if raw.get("PrimaryEmailAddr") else None
+    phone = raw.get("PrimaryPhone", {}).get("FreeFormNumber") if raw.get("PrimaryPhone") else None
+    address = format_qbo_address(raw.get("BillAddr"))
+    name = raw.get("PrintOnCheckName") or raw.get("DisplayName", "")
+    
+    return {
+        "id": raw.get("Id"),
+        "name": name,
+        "email": email,
+        "phone": phone,
+        "type": "supplier",
+        "address": address
+    }
+
+
+def normalize_qbo_account(raw: dict) -> dict:
+    """
+    QBO Account → NormalizedAccount
+    """
+    tax_type = raw.get("TaxCodeRef", {}).get("value") if raw.get("TaxCodeRef") else None
+    currency_code = raw.get("CurrencyRef", {}).get("value") if raw.get("CurrencyRef") else None
+    code = raw.get("AcctNum") or raw.get("Id") or ""
+    
+    return {
+        "id": raw.get("Id"),
+        "code": code,
+        "name": raw.get("Name", ""),
+        "type": raw.get("AccountType", ""),
+        "tax_type": tax_type,
+        "currency_code": currency_code
+    }
+
+
+# The QBOAdapter class implementation
 class QBOAdapter(BaseERPAdapter):
     """
     QBO Adapter — implements BaseERPAdapter for QuickBooks Online.
@@ -232,21 +338,114 @@ class QBOAdapter(BaseERPAdapter):
             raise_not_found("quickbooks", f"Invoice {invoice_id}")
         return normalize_qbo_invoice(raw)
 
+    async def get_bills(self, token: str, tenant_id: str,
+                        from_date: str = None, to_date: str = None) -> list[dict]:
+        """
+        Fetch all QBO Bills.
+        IMPORTANT: QBO Bill is a SEPARATE entity from Invoice.
+        Use 'SELECT * FROM Bill' — NOT 'SELECT * FROM Invoice'.
+        """
+        client = QBOHttpClient(token, tenant_id)
+        
+        conditions = []
+        if from_date:
+            conditions.append(f"TxnDate >= '{from_date}'")
+        if to_date:
+            conditions.append(f"TxnDate <= '{to_date}'")
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        base_query = f"SELECT * FROM Bill {where_clause}".strip()
+        
+        async def fetch_page(page: int) -> list:
+            start = (page - 1) * 1000 + 1
+            sql = f"{base_query} STARTPOSITION {start} MAXRESULTS 1000"
+            response = await client.query(sql)
+            return extract_query_results(response, "Bill")
+        
+        all_raw = await fetch_all_pages(fetch_page)
+        return [normalize_qbo_bill(b) for b in all_raw]
 
-    async def get_bills(self, token, tenant_id, from_date=None, to_date=None):
-        raise NotImplementedError("Coming in Build Prompt 3")
+    async def get_bill(self, token: str, tenant_id: str, bill_id: str) -> dict:
+        """
+        Fetch a single QBO Bill by ID.
+        """
+        client = QBOHttpClient(token, tenant_id)
+        response = await client.get_entity("bill", bill_id)
+        raw = response.get("Bill")
+        if not raw:
+            from utils.errors import raise_not_found
+            raise_not_found("quickbooks", f"Bill {bill_id}")
+        return normalize_qbo_bill(raw)
 
-    async def get_bill(self, token, tenant_id, bill_id):
-        raise NotImplementedError("Coming in Build Prompt 3")
+    async def get_contacts(self, token: str, tenant_id: str,
+                           contact_type: str = None) -> list[dict]:
+        """
+        Fetch QBO contacts. 
+        QBO has SEPARATE Customer and Vendor entities (unlike Xero's single /Contacts).
+        
+        contact_type == "customer"  → query Customer only
+        contact_type == "supplier"  → query Vendor only
+        contact_type == None        → query both and merge
+        """
+        client = QBOHttpClient(token, tenant_id)
+        result = []
+        
+        if contact_type in (None, "customer"):
+            async def fetch_customers(page: int) -> list:
+                start = (page - 1) * 1000 + 1
+                sql = f"SELECT * FROM Customer WHERE Active = true STARTPOSITION {start} MAXRESULTS 1000"
+                resp = await client.query(sql)
+                return extract_query_results(resp, "Customer")
+            customers = await fetch_all_pages(fetch_customers)
+            result.extend([normalize_qbo_customer(c) for c in customers])
+        
+        if contact_type in (None, "supplier"):
+            async def fetch_vendors(page: int) -> list:
+                start = (page - 1) * 1000 + 1
+                sql = f"SELECT * FROM Vendor WHERE Active = true STARTPOSITION {start} MAXRESULTS 1000"
+                resp = await client.query(sql)
+                return extract_query_results(resp, "Vendor")
+            vendors = await fetch_all_pages(fetch_vendors)
+            result.extend([normalize_qbo_vendor(v) for v in vendors])
+        
+        return result
 
-    async def get_contacts(self, token, tenant_id, contact_type=None):
-        raise NotImplementedError("Coming in Build Prompt 3")
+    async def get_contact(self, token: str, tenant_id: str, contact_id: str) -> dict:
+        """
+        Fetch a single QBO Customer or Vendor contact by ID.
+        """
+        client = QBOHttpClient(token, tenant_id)
+        # Try Customer first
+        try:
+            response = await client.get_entity("customer", contact_id)
+            raw = response.get("Customer")
+            if raw:
+                return normalize_qbo_customer(raw)
+        except Exception:
+            pass
+            
+        # Try Vendor next
+        try:
+            response = await client.get_entity("vendor", contact_id)
+            raw = response.get("Vendor")
+            if raw:
+                return normalize_qbo_vendor(raw)
+        except Exception:
+            pass
+            
+        from utils.errors import raise_not_found
+        raise_not_found("quickbooks", f"Contact {contact_id}")
 
-    async def get_contact(self, token, tenant_id, contact_id):
-        raise NotImplementedError("Coming in Build Prompt 3")
-
-    async def get_accounts(self, token, tenant_id):
-        raise NotImplementedError("Coming in Build Prompt 3")
+    async def get_accounts(self, token: str, tenant_id: str) -> list[dict]:
+        client = QBOHttpClient(token, tenant_id)
+        
+        async def fetch_page(page: int) -> list:
+            start = (page - 1) * 1000 + 1
+            sql = f"SELECT * FROM Account WHERE Active = true STARTPOSITION {start} MAXRESULTS 1000"
+            resp = await client.query(sql)
+            return extract_query_results(resp, "Account")
+        
+        all_raw = await fetch_all_pages(fetch_page)
+        return [normalize_qbo_account(a) for a in all_raw]
 
     async def create_invoice(self, token, tenant_id, data):
         raise NotImplementedError("Coming in Build Prompt 4")
@@ -259,4 +458,5 @@ class QBOAdapter(BaseERPAdapter):
 
     async def record_payment(self, token, tenant_id, data):
         raise NotImplementedError("Coming in Build Prompt 5")
+
 
