@@ -7,6 +7,7 @@ from utils.rate_limiter import check_rate_limit
 from utils.logger import correlation_id_var, get_logger
 from adapters import get_adapter as _registry_get_adapter
 from models.schemas import CreateInvoiceRequest, CreateBillRequest, CreateContactRequest, RecordPaymentRequest
+from middleware.auth import require_erp_auth
 
 router = APIRouter(prefix="/erp")
 logger = get_logger("routes.erp")
@@ -29,20 +30,6 @@ def get_adapter():
         raise AppError("INVALID_CONFIG", str(exc), 500)
 
 
-async def auth_headers(
-    x_erp_token: Optional[str] = Header(None, alias="X-ERP-Token"),
-    x_erp_tenant_id: Optional[str] = Header(None, alias="X-ERP-Tenant-Id"),
-):
-    """
-    Dependency — validates mandatory auth headers and enforces rate limiting.
-    Returns (token, tenant_id) tuple consumed by every protected route.
-    """
-    if not x_erp_token:
-        raise AppError("MISSING_HEADER", "X-ERP-Token header is required.", 400)
-    if not x_erp_tenant_id:
-        raise AppError("MISSING_HEADER", "X-ERP-Tenant-Id header is required.", 400)
-    await check_rate_limit(x_erp_tenant_id)
-    return x_erp_token, x_erp_tenant_id
 
 
 def _ok(data: Any, count: int | None = None) -> dict:
@@ -94,7 +81,7 @@ async def health():
     response_description="Paginated list of NormalizedInvoice objects",
 )
 async def list_invoices(
-    headers=Depends(auth_headers),
+    headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
     from_date: Optional[str] = Query(None, alias="from", description="ISO 8601 start date"),
     to_date: Optional[str] = Query(None, alias="to", description="ISO 8601 end date"),
@@ -117,7 +104,7 @@ async def list_invoices(
 )
 async def get_invoice(
     invoice_id: str,
-    headers=Depends(auth_headers),
+    headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
 ):
     # TODO: T-02 — verify GET /erp/invoices/{id} returns correct invoice
@@ -134,7 +121,7 @@ async def get_invoice(
     response_description="Created NormalizedInvoice object",
 )
 async def create_invoice(
-    headers=Depends(auth_headers),
+    headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
     payload: CreateInvoiceRequest = Body(...),
 ):
@@ -155,7 +142,7 @@ async def create_invoice(
     response_description="Paginated list of NormalizedBill objects",
 )
 async def list_bills(
-    headers=Depends(auth_headers),
+    headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
     from_date: Optional[str] = Query(None, alias="from", description="ISO 8601 start date"),
     to_date: Optional[str] = Query(None, alias="to", description="ISO 8601 end date"),
@@ -177,7 +164,7 @@ async def list_bills(
 )
 async def get_bill(
     bill_id: str,
-    headers=Depends(auth_headers),
+    headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
 ):
     # TODO: T-05 — verify GET /erp/bills/{id} returns correct bill
@@ -200,7 +187,7 @@ async def get_bill(
     response_description="Created NormalizedBill object",
 )
 async def create_bill(
-    headers=Depends(auth_headers),
+    headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
     payload: CreateBillRequest = Body(...),
 ):
@@ -221,7 +208,7 @@ async def create_bill(
     response_description="List of NormalizedContact objects",
 )
 async def list_contacts(
-    headers=Depends(auth_headers),
+    headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
     contact_type: Optional[str] = Query(
         None, alias="type", description="customer | supplier"
@@ -243,7 +230,7 @@ async def list_contacts(
 )
 async def get_contact(
     contact_id: str,
-    headers=Depends(auth_headers),
+    headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
 ):
     # TODO: T-08 — verify GET /erp/contacts/{id} returns correct contact
@@ -264,7 +251,7 @@ async def get_contact(
     response_description="Created NormalizedContact object",
 )
 async def create_contact(
-    headers=Depends(auth_headers),
+    headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
     payload: CreateContactRequest = Body(...),
 ):
@@ -285,7 +272,7 @@ async def create_contact(
     response_description="List of NormalizedAccount objects",
 )
 async def list_accounts(
-    headers=Depends(auth_headers),
+    headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
 ):
     # TODO: T-10 — verify GET /erp/accounts returns list with code/name/type fields
@@ -306,7 +293,7 @@ async def list_accounts(
     response_description="Recorded payment confirmation",
 )
 async def record_payment(
-    headers=Depends(auth_headers),
+    headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
     payload: RecordPaymentRequest = Body(...),
 ):
