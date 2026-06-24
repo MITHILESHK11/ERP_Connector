@@ -6,6 +6,7 @@ from utils.errors import AppError
 from utils.rate_limiter import check_rate_limit
 from utils.logger import correlation_id_var, get_logger
 from adapters import get_adapter as _registry_get_adapter
+from models.schemas import CreateInvoiceRequest, CreateBillRequest, CreateContactRequest, RecordPaymentRequest
 
 router = APIRouter(prefix="/erp")
 logger = get_logger("routes.erp")
@@ -135,11 +136,11 @@ async def get_invoice(
 async def create_invoice(
     headers=Depends(auth_headers),
     adapter=Depends(get_adapter),
-    payload: dict = Body(...),
+    payload: CreateInvoiceRequest = Body(...),
 ):
     # TODO: T-03 — verify POST /erp/invoices creates invoice and returns id/status
     token, tenant_id = headers
-    data = await adapter.create_invoice(token=token, tenant_id=tenant_id, data=payload)
+    data = await adapter.create_invoice(token=token, tenant_id=tenant_id, data=payload.model_dump())
     return _ok(data)
 
 
@@ -201,11 +202,11 @@ async def get_bill(
 async def create_bill(
     headers=Depends(auth_headers),
     adapter=Depends(get_adapter),
-    payload: dict = Body(...),
+    payload: CreateBillRequest = Body(...),
 ):
     # TODO: T-06 — verify POST /erp/bills creates bill and returns id/status
     token, tenant_id = headers
-    data = await adapter.create_bill(token=token, tenant_id=tenant_id, data=payload)
+    data = await adapter.create_bill(token=token, tenant_id=tenant_id, data=payload.model_dump())
     return _ok(data)
 
 
@@ -265,11 +266,11 @@ async def get_contact(
 async def create_contact(
     headers=Depends(auth_headers),
     adapter=Depends(get_adapter),
-    payload: dict = Body(...),
+    payload: CreateContactRequest = Body(...),
 ):
     # TODO: T-09 — verify POST /erp/contacts creates contact and returns id
     token, tenant_id = headers
-    data = await adapter.create_contact(token=token, tenant_id=tenant_id, data=payload)
+    data = await adapter.create_contact(token=token, tenant_id=tenant_id, data=payload.model_dump())
     return _ok(data)
 
 
@@ -307,9 +308,9 @@ async def list_accounts(
 async def record_payment(
     headers=Depends(auth_headers),
     adapter=Depends(get_adapter),
-    payload: dict = Body(...),
+    payload: RecordPaymentRequest = Body(...),
 ):
     # TODO: T-11 — verify POST /erp/payments records payment and links to invoice/bill
     token, tenant_id = headers
-    data = await adapter.record_payment(token=token, tenant_id=tenant_id, data=payload)
+    data = await adapter.record_payment(token=token, tenant_id=tenant_id, data=payload.model_dump())
     return _ok(data)

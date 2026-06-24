@@ -1,6 +1,7 @@
 import datetime
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from utils.logger import correlation_id_var, get_logger
 from config.settings import get_settings
 
@@ -93,6 +94,33 @@ def handle_generic_error(request: Request, exc: Exception) -> JSONResponse:
         }}
     )
     return build_error_response("INTERNAL_ERROR", "An unexpected internal server error occurred.", settings.ERP_TYPE, 500)
+
+
+def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """
+    Handler for FastAPI request validation errors (Pydantic validation failures).
+    Formats them into the standard ERPConnectorError shape with error_code=INVALID_REQUEST.
+    """
+    settings = get_settings()
+    errors = exc.errors()
+    error_messages = []
+    for err in errors:
+        loc = " -> ".join(str(x) for x in err.get("loc", []))
+        msg = err.get("msg", "invalid value")
+        error_messages.append(f"{loc}: {msg}")
+    
+    message = "; ".join(error_messages)
+    
+    logger.error(
+        f"Validation Error [INVALID_REQUEST]: {message}",
+        extra={"extra_info": {
+            "error_code": "INVALID_REQUEST",
+            "erp": settings.ERP_TYPE,
+            "path": request.url.path
+        }}
+    )
+    
+    return build_error_response("INVALID_REQUEST", message, settings.ERP_TYPE, 400)
 
 
 # ---------------------------------------------------------------------------

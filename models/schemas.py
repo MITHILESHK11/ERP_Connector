@@ -1,5 +1,5 @@
 from typing import List, Optional, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from datetime import datetime
 
 # ==========================================
@@ -212,3 +212,100 @@ class ErrorResponse(BaseModel):
         ..., 
         description="UTC Timestamp of the error occurrence in ISO 8601 format"
     )
+
+
+# ==========================================
+# WRITE REQUEST VALIDATION SCHEMAS
+# ==========================================
+
+class LineItem(BaseModel):
+    description: str = Field(..., min_length=1)
+    quantity: float = Field(..., gt=0)
+    unit_amount: int = Field(..., gt=0)
+    account_code: str = Field(...)
+    tax_type: Optional[str] = None
+
+
+class CreateInvoiceRequest(BaseModel):
+    contact_id: str = Field(...)
+    date: str = Field(...)
+    due_date: str = Field(...)
+    currency: str = Field(..., pattern=r"^[A-Z]{3}$")
+    line_items: List[LineItem] = Field(..., min_length=1)
+
+    @field_validator("date", "due_date")
+    @classmethod
+    def validate_date_format(cls, v: str) -> str:
+        import datetime
+        try:
+            datetime.datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Date must be in YYYY-MM-DD format and be a valid calendar date.")
+        return v
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        import datetime
+        try:
+            d1 = datetime.datetime.strptime(self.date, "%Y-%m-%d")
+            d2 = datetime.datetime.strptime(self.due_date, "%Y-%m-%d")
+            if d2 < d1:
+                raise ValueError("due_date must be greater than or equal to date")
+        except ValueError as e:
+            raise ValueError(str(e))
+        return self
+
+
+class CreateBillRequest(BaseModel):
+    supplier_id: str = Field(...)
+    date: str = Field(...)
+    due_date: str = Field(...)
+    currency: str = Field(..., pattern=r"^[A-Z]{3}$")
+    line_items: List[LineItem] = Field(..., min_length=1)
+
+    @field_validator("date", "due_date")
+    @classmethod
+    def validate_date_format(cls, v: str) -> str:
+        import datetime
+        try:
+            datetime.datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Date must be in YYYY-MM-DD format and be a valid calendar date.")
+        return v
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        import datetime
+        try:
+            d1 = datetime.datetime.strptime(self.date, "%Y-%m-%d")
+            d2 = datetime.datetime.strptime(self.due_date, "%Y-%m-%d")
+            if d2 < d1:
+                raise ValueError("due_date must be greater than or equal to date")
+        except ValueError as e:
+            raise ValueError(str(e))
+        return self
+
+
+class CreateContactRequest(BaseModel):
+    name: str = Field(...)
+    email: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+    phone: Optional[str] = None
+    type: Literal["customer", "supplier"] = Field(...)
+
+
+class RecordPaymentRequest(BaseModel):
+    invoice_id: str = Field(...)
+    amount: int = Field(..., gt=0)
+    date: str = Field(...)
+    account_code: str = Field(...)
+
+    @field_validator("date")
+    @classmethod
+    def validate_date_format(cls, v: str) -> str:
+        import datetime
+        try:
+            datetime.datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Date must be in YYYY-MM-DD format and be a valid calendar date.")
+        return v
+
