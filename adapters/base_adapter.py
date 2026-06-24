@@ -61,6 +61,21 @@ class BaseERPAdapter(ABC):
         pass
 
     @abstractmethod
+    async def get_bill(self, token: str, tenant_id: str, bill_id: str) -> dict:
+        """
+        Fetch details of a single bill from the ERP by its ID and normalize it.
+        
+        Args:
+            token (str): The OAuth 2.0 access token.
+            tenant_id (str): The tenant/realm/organisation identifier.
+            bill_id (str): The unique bill ID in the ERP system.
+
+        Returns:
+            dict: A dictionary matching the NormalizedBill Pydantic schema.
+        """
+        pass
+
+    @abstractmethod
     async def get_contacts(self, token: str, tenant_id: str, 
                            contact_type: str = None) -> list[dict]:
         """
@@ -73,6 +88,21 @@ class BaseERPAdapter(ABC):
 
         Returns:
             list[dict]: A list of dictionaries matching the NormalizedContact Pydantic schema.
+        """
+        pass
+
+    @abstractmethod
+    async def get_contact(self, token: str, tenant_id: str, contact_id: str) -> dict:
+        """
+        Fetch details of a single contact from the ERP by its ID and normalize it.
+        
+        Args:
+            token (str): The OAuth 2.0 access token.
+            tenant_id (str): The tenant/realm/organisation identifier.
+            contact_id (str): The unique contact ID in the ERP system.
+
+        Returns:
+            dict: A dictionary matching the NormalizedContact Pydantic schema.
         """
         pass
 

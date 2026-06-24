@@ -1,8 +1,17 @@
 import datetime
+import httpx
+from contextlib import asynccontextmanager
 from typing import Optional, Any
 from fastapi import APIRouter, Depends, Header, Query, Body
 from config.settings import get_settings
-from utils.errors import AppError
+from utils.errors import (
+    AppError,
+    raise_token_expired,
+    raise_not_found,
+    raise_invalid_request,
+    raise_erp_unavailable,
+    raise_erp_timeout
+)
 from utils.rate_limiter import check_rate_limit
 from utils.logger import correlation_id_var, get_logger
 from adapters import get_adapter as _registry_get_adapter
@@ -30,6 +39,35 @@ def get_adapter():
         raise AppError("INVALID_CONFIG", str(exc), 500)
 
 
+@asynccontextmanager
+async def handle_adapter_errors(erp: str, tenant_id: str, endpoint: str):
+    """
+    Context manager to wrap adapter calls, log outbound calls,
+    and map HTTP exceptions to unified error classes.
+    """
+    logger.info(
+        f"ERP call made: {erp.upper()} {endpoint}",
+        extra={"erp": erp, "endpoint": endpoint, "tenant_id": tenant_id}
+    )
+    try:
+        yield
+    except httpx.TimeoutException:
+        raise_erp_timeout(erp)
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        if status_code == 401:
+            raise_token_expired(erp)
+        elif status_code == 404:
+            raise_not_found(erp, endpoint)
+        elif status_code == 400:
+            raise_invalid_request(erp, str(exc))
+        elif status_code == 429:
+            logger.warning(f"ERP returned 429 rate limit error for ERP {erp}")
+            raise_erp_unavailable(erp)
+        elif status_code in (500, 503):
+            raise_erp_unavailable(erp)
+        else:
+            raise
 
 
 def _ok(data: Any, count: int | None = None) -> dict:
@@ -87,12 +125,13 @@ async def list_invoices(
     to_date: Optional[str] = Query(None, alias="to", description="ISO 8601 end date"),
     status: Optional[str] = Query(None, description="draft | authorised | paid | voided"),
 ):
-    # TODO: T-01 — verify GET /erp/invoices returns list with correct schema
     token, tenant_id = headers
-    data = await adapter.get_invoices(
-        token=token, tenant_id=tenant_id,
-        from_date=from_date, to_date=to_date, status=status,
-    )
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, "GET /invoices"):
+        data = await adapter.get_invoices(
+            token=token, tenant_id=tenant_id,
+            from_date=from_date, to_date=to_date, status=status
+        )
     return _ok(data, count=len(data))
 
 
@@ -107,9 +146,10 @@ async def get_invoice(
     headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
 ):
-    # TODO: T-02 — verify GET /erp/invoices/{id} returns correct invoice
     token, tenant_id = headers
-    data = await adapter.get_invoice(token=token, tenant_id=tenant_id, invoice_id=invoice_id)
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, f"GET /invoices/{invoice_id}"):
+        data = await adapter.get_invoice(token=token, tenant_id=tenant_id, invoice_id=invoice_id)
     return _ok(data)
 
 
@@ -125,9 +165,10 @@ async def create_invoice(
     adapter=Depends(get_adapter),
     payload: CreateInvoiceRequest = Body(...),
 ):
-    # TODO: T-03 — verify POST /erp/invoices creates invoice and returns id/status
     token, tenant_id = headers
-    data = await adapter.create_invoice(token=token, tenant_id=tenant_id, data=payload.model_dump())
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, "POST /invoices"):
+        data = await adapter.create_invoice(token=token, tenant_id=tenant_id, data=payload.model_dump())
     return _ok(data)
 
 
@@ -147,12 +188,13 @@ async def list_bills(
     from_date: Optional[str] = Query(None, alias="from", description="ISO 8601 start date"),
     to_date: Optional[str] = Query(None, alias="to", description="ISO 8601 end date"),
 ):
-    # TODO: T-04 — verify GET /erp/bills returns list with correct schema
     token, tenant_id = headers
-    data = await adapter.get_bills(
-        token=token, tenant_id=tenant_id,
-        from_date=from_date, to_date=to_date,
-    )
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, "GET /bills"):
+        data = await adapter.get_bills(
+            token=token, tenant_id=tenant_id,
+            from_date=from_date, to_date=to_date
+        )
     return _ok(data, count=len(data))
 
 
@@ -167,16 +209,11 @@ async def get_bill(
     headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
 ):
-    # TODO: T-05 — verify GET /erp/bills/{id} returns correct bill
     token, tenant_id = headers
-    # BaseERPAdapter does not have get_bill — delegate to get_bills and filter
-    # Dev 2/3 may add get_bill(); until then surface a clear 501
-    raise AppError(
-        "ADAPTER_NOT_IMPLEMENTED",
-        "GET /erp/bills/{bill_id} requires adapters to implement get_bill(). "
-        "Dev 2 (Xero) and Dev 3 (QBO) must add this method.",
-        501,
-    )
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, f"GET /bills/{bill_id}"):
+        data = await adapter.get_bill(token=token, tenant_id=tenant_id, bill_id=bill_id)
+    return _ok(data)
 
 
 @router.post(
@@ -191,9 +228,10 @@ async def create_bill(
     adapter=Depends(get_adapter),
     payload: CreateBillRequest = Body(...),
 ):
-    # TODO: T-06 — verify POST /erp/bills creates bill and returns id/status
     token, tenant_id = headers
-    data = await adapter.create_bill(token=token, tenant_id=tenant_id, data=payload.model_dump())
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, "POST /bills"):
+        data = await adapter.create_bill(token=token, tenant_id=tenant_id, data=payload.model_dump())
     return _ok(data)
 
 
@@ -214,11 +252,12 @@ async def list_contacts(
         None, alias="type", description="customer | supplier"
     ),
 ):
-    # TODO: T-07 — verify GET /erp/contacts returns list, optionally filtered by type
     token, tenant_id = headers
-    data = await adapter.get_contacts(
-        token=token, tenant_id=tenant_id, contact_type=contact_type,
-    )
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, "GET /contacts"):
+        data = await adapter.get_contacts(
+            token=token, tenant_id=tenant_id, contact_type=contact_type
+        )
     return _ok(data, count=len(data))
 
 
@@ -233,14 +272,11 @@ async def get_contact(
     headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
 ):
-    # TODO: T-08 — verify GET /erp/contacts/{id} returns correct contact
     token, tenant_id = headers
-    raise AppError(
-        "ADAPTER_NOT_IMPLEMENTED",
-        "GET /erp/contacts/{contact_id} requires adapters to implement get_contact(). "
-        "Dev 2 (Xero) and Dev 3 (QBO) must add this method.",
-        501,
-    )
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, f"GET /contacts/{contact_id}"):
+        data = await adapter.get_contact(token=token, tenant_id=tenant_id, contact_id=contact_id)
+    return _ok(data)
 
 
 @router.post(
@@ -255,9 +291,10 @@ async def create_contact(
     adapter=Depends(get_adapter),
     payload: CreateContactRequest = Body(...),
 ):
-    # TODO: T-09 — verify POST /erp/contacts creates contact and returns id
     token, tenant_id = headers
-    data = await adapter.create_contact(token=token, tenant_id=tenant_id, data=payload.model_dump())
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, "POST /contacts"):
+        data = await adapter.create_contact(token=token, tenant_id=tenant_id, data=payload.model_dump())
     return _ok(data)
 
 
@@ -275,9 +312,10 @@ async def list_accounts(
     headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
 ):
-    # TODO: T-10 — verify GET /erp/accounts returns list with code/name/type fields
     token, tenant_id = headers
-    data = await adapter.get_accounts(token=token, tenant_id=tenant_id)
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, "GET /accounts"):
+        data = await adapter.get_accounts(token=token, tenant_id=tenant_id)
     return _ok(data, count=len(data))
 
 
@@ -297,7 +335,8 @@ async def record_payment(
     adapter=Depends(get_adapter),
     payload: RecordPaymentRequest = Body(...),
 ):
-    # TODO: T-11 — verify POST /erp/payments records payment and links to invoice/bill
     token, tenant_id = headers
-    data = await adapter.record_payment(token=token, tenant_id=tenant_id, data=payload.model_dump())
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, "POST /payments"):
+        data = await adapter.record_payment(token=token, tenant_id=tenant_id, data=payload.model_dump())
     return _ok(data)
