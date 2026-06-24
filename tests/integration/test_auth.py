@@ -52,8 +52,15 @@ def test_invoices_endpoint_empty_token():
 
 def test_invoices_endpoint_bearer_prefix_stripped(monkeypatch):
     # If valid headers are passed, should proceed past auth and hit adapter.
-    # Since adapter is a stub raising 501, it should result in 501 instead of 401!
-    
+    # We patch the adapter method to avoid making actual external API calls.
+    called = []
+    async def mock_get_invoices(self, token, tenant_id, from_date=None, to_date=None, status=None):
+        called.append((token, tenant_id))
+        return []
+
+    from adapters.qbo import QBOAdapter
+    monkeypatch.setattr(QBOAdapter, "get_invoices", mock_get_invoices)
+
     response = client.get(
         "/erp/invoices",
         headers={
@@ -61,7 +68,13 @@ def test_invoices_endpoint_bearer_prefix_stripped(monkeypatch):
             "X-ERP-Tenant-Id": "tenant-123"
         }
     )
-    # Stubs return 501, meaning auth check succeeded and got delegated!
-    assert response.status_code == 501
-    data = response.json()
-    assert data["error"] == "ADAPTER_NOT_IMPLEMENTED"
+    assert response.status_code == 200
+    res = response.json()
+    assert res["success"] is True
+    assert res["data"] == []
+    assert res["erp"] == "quickbooks"
+    assert res["count"] == 0
+    assert "correlationId" in res
+    assert called == [("my_valid_token_xyz", "tenant-123")]
+
+

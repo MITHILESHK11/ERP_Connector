@@ -85,6 +85,16 @@ def handle_generic_error(request: Request, exc: Exception) -> JSONResponse:
     Fallthrough exception handler for unexpected system exceptions.
     """
     settings = get_settings()
+    if isinstance(exc, NotImplementedError):
+        logger.error(
+            f"NotImplementedError: {str(exc)}",
+            extra={"extra_info": {
+                "erp": settings.ERP_TYPE,
+                "path": request.url.path
+            }}
+        )
+        return build_error_response("NOT_IMPLEMENTED", str(exc), settings.ERP_TYPE, 501)
+
     logger.error(
         f"Unhandled Exception: {str(exc)}",
         exc_info=True,
@@ -94,6 +104,7 @@ def handle_generic_error(request: Request, exc: Exception) -> JSONResponse:
         }}
     )
     return build_error_response("INTERNAL_ERROR", "An unexpected internal server error occurred.", settings.ERP_TYPE, 500)
+
 
 
 def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
