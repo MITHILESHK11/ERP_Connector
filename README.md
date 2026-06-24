@@ -112,9 +112,9 @@ erp_connector/
 
 | Developer | Role | Owns |
 |-----------|------|------|
-| **Dev 1** | Core Engine | `main.py`, `config/`, `models/schemas.py`, `routes/`, `utils/`, `adapters/__init__.py`, `adapters/base_adapter.py` |
-| **Dev 2** | Xero Adapter | `adapters/xero.py` only |
-| **Dev 3** | QBO Adapter | `adapters/qbo.py` only |
+| **Mithilesh Kolhapurkar** | Core Engine | `main.py`, `config/`, `models/schemas.py`, `routes/`, `utils/`, `adapters/__init__.py`, `adapters/base_adapter.py` |
+| **Ankita Patil** | QBO Adapter | `adapters/qbo.py` only |
+| **Samreen Shaikh** | Xero Adapter | `adapters/xero.py` only |
 
 > ⚠️ **Dev 2 and Dev 3 must not modify any file outside their adapter file without team consensus.**
 
@@ -273,9 +273,9 @@ All endpoints require two custom headers (except `/erp/health`):
 | Branch | Purpose |
 |--------|---------|
 | `main` | Protected. Production-ready code only. |
-| `dev1/` | Dev 1 — Core Engine |
-| `dev2/` | Dev 2 — Xero Adapter |
-| `dev3/` | Dev 3 — QBO Adapter |
+| `dev1/` | Mithilesh Kolhapurkar — Core Engine |
+| `dev2/` | Ankita Patil — QBO Adapter |
+| `dev3/` | Samreen Shaikh — Xero Adapter |
 
 PRs from `dev*/` branches must be reviewed before merging to `main`.
 
