@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from config.settings import get_settings
-from utils.errors import AppError, handle_app_error, handle_generic_error
+from utils.errors import AppError, handle_app_error, handle_generic_error, ERPConnectorError, handle_erp_connector_error
 from utils.logger import correlation_id_var, get_logger
 
 logger = get_logger("main")
@@ -72,6 +72,7 @@ app.add_middleware(CorrelationIDMiddleware)
 
 # Exception handlers
 app.add_exception_handler(AppError, handle_app_error)
+app.add_exception_handler(ERPConnectorError, handle_erp_connector_error)
 app.add_exception_handler(Exception, handle_generic_error)
 
 # Routes
