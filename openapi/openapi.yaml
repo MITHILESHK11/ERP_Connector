@@ -638,7 +638,7 @@ components:
       name: X-ERP-Token
       in: header
       required: true
-      description: Access token prefixed with Bearer or raw OAuth access token
+      description: "OAuth 2.0 Access Token (Enter your active access token. Can be prefixed with 'Bearer ' or passed as a raw token string from the Intuit OAuth Playground)"
       schema:
         type: string
         example: "Bearer eyJhbGciOiJSUzI1Ni..."
@@ -646,10 +646,10 @@ components:
       name: X-ERP-Tenant-Id
       in: header
       required: true
-      description: Upstream ERP organisation or tenant ID
+      description: "QuickBooks Online Realm ID / Company ID or Xero Tenant ID (For QuickBooks Online sandbox, enter your 16-digit Realm ID. E.g., 9341457318163676)"
       schema:
         type: string
-        example: "tenant-12345"
+        example: "9341457318163676"
 
   responses:
     Error400:

@@ -94,7 +94,6 @@ def _ok(data: Any, count: int | None = None) -> dict:
     response_description="Service status, active ERP type, and version",
 )
 async def health():
-    # TODO: T-01 — verify /health returns 200 with status/erp/version keys
     """
     Liveness probe. No auth headers required.
     Does NOT contact the upstream ERP — returns config values only.
