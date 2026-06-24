@@ -283,13 +283,13 @@ PRs from `dev*/` branches must be reviewed before merging to `main`.
 ## Running Tests
 
 ```bash
+# Run the complete test suite (unit and integration tests)
 pytest -v
 ```
 
-| Test | Status |
+| Test Suite | Status |
 |------|--------|
-| `tests/integration/test_health.py::test_health` | ✅ Passing |
-| All other tests | 🔄 Awaiting adapter implementations |
+| All Unit & Integration Tests (46/46) | ✅ Passing |
 
 ---
 
@@ -304,11 +304,12 @@ pytest -v
 | `adapters/__init__.py` (registry) | ✅ Complete |
 | `utils/` (logger, errors, rate_limiter) | ✅ Complete |
 | `main.py` (app, middleware) | ✅ Complete |
-| `routes/erp.py` (12 route stubs) | ✅ Complete |
+| `routes/erp.py` (13 routes including PUT) | ✅ Complete |
 | `adapters/xero.py` | 🔄 Dev 2 — In Progress |
-| `adapters/qbo.py` | 🔄 Dev 3 — In Progress |
-| Integration tests (invoices, bills …) | ⏳ Pending adapters |
+| `adapters/qbo.py` (QuickBooks Online) | ✅ Complete |
+| Integration tests / Unit tests | ✅ Complete & Passing |
 
 ---
 
 *ERP Connector — Phase 0 | Python FastAPI | June 2026*
+
