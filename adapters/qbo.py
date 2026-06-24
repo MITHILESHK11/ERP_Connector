@@ -286,8 +286,30 @@ def normalize_qbo_account(raw: dict) -> dict:
     }
 
 
+def build_qbo_lines_from_items(line_items: list[dict]) -> list[dict]:
+    """
+    Convert our normalised line_items to QBO Line array format.
+    unit_amount in our schema is integer (paise/cents) → divide by 100 for QBO float.
+    """
+    lines = []
+    for item in line_items:
+        amount_float = item["unit_amount"] / 100
+        qty = item.get("quantity", 1)
+        lines.append({
+            "Amount": round(amount_float * qty, 2),
+            "DetailType": "SalesItemLineDetail",
+            "SalesItemLineDetail": {
+                "ItemRef": { "value": "1", "name": item.get("description", "") },
+                "Qty": qty,
+                "UnitPrice": amount_float,
+            }
+        })
+    return lines
+
+
 # The QBOAdapter class implementation
 class QBOAdapter(BaseERPAdapter):
+
     """
     QBO Adapter — implements BaseERPAdapter for QuickBooks Online.
     All methods call the real QBO sandbox API via QBOHttpClient.
@@ -447,16 +469,92 @@ class QBOAdapter(BaseERPAdapter):
         all_raw = await fetch_all_pages(fetch_page)
         return [normalize_qbo_account(a) for a in all_raw]
 
-    async def create_invoice(self, token, tenant_id, data):
-        raise NotImplementedError("Coming in Build Prompt 4")
+    async def create_invoice(self, token: str, tenant_id: str, data: dict) -> dict:
+        """
+        Create a QBO Invoice (sales invoice — equivalent to Xero ACCREC).
+        QBO returns the created invoice in the response body.
+        """
+        client = QBOHttpClient(token, tenant_id)
+        
+        qbo_body = {
+            "Line": build_qbo_lines_from_items(data.get("line_items", [])),
+            "CustomerRef": { "value": data["contact_id"] },
+            "TxnDate": data["date"],
+            "DueDate": data["due_date"],
+            "CurrencyRef": { "value": data.get("currency", "USD") },
+        }
+        
+        response = await client.post_entity("invoice", qbo_body)
+        raw = response.get("Invoice", {})
+        return normalize_qbo_invoice(raw)
 
-    async def create_bill(self, token, tenant_id, data):
-        raise NotImplementedError("Coming in Build Prompt 4")
+    async def create_bill(self, token: str, tenant_id: str, data: dict) -> dict:
+        """
+        Create a QBO Bill (vendor bill — completely separate entity from Invoice in QBO).
+        QBO Bills use VendorRef (not CustomerRef) and AccountBasedExpenseLineDetail.
+        """
+        client = QBOHttpClient(token, tenant_id)
+        
+        bill_lines = []
+        for item in data.get("line_items", []):
+            amount_float = item["unit_amount"] / 100
+            bill_lines.append({
+                "Amount": round(amount_float * item.get("quantity", 1), 2),
+                "DetailType": "AccountBasedExpenseLineDetail",
+                "AccountBasedExpenseLineDetail": {
+                    "AccountRef": {
+                        "value": item.get("account_code", "1"),
+                        "name": item.get("description", ""),
+                    }
+                }
+            })
+        
+        qbo_body = {
+            "Line": bill_lines,
+            "VendorRef": { "value": data["supplier_id"] },
+            "TxnDate": data["date"],
+            "DueDate": data.get("due_date"),
+            "CurrencyRef": { "value": data.get("currency", "USD") },
+        }
+        
+        response = await client.post_entity("bill", qbo_body)
+        raw = response.get("Bill", {})
+        return normalize_qbo_bill(raw)
 
-    async def create_contact(self, token, tenant_id, data):
-        raise NotImplementedError("Coming in Build Prompt 4")
+    async def create_contact(self, token: str, tenant_id: str, data: dict) -> dict:
+        """
+        Create a QBO Customer or Vendor based on contact type.
+        "customer" → POST to /customer
+        "supplier" → POST to /vendor
+        """
+        client = QBOHttpClient(token, tenant_id)
+        contact_type = data.get("type", "customer")
+        
+        if contact_type == "customer":
+            qbo_body = {
+                "DisplayName": data["name"],
+                "PrimaryEmailAddr": {"Address": data.get("email")} if data.get("email") else None,
+                "PrimaryPhone": {"FreeFormNumber": data.get("phone")} if data.get("phone") else None,
+            }
+            qbo_body = {k: v for k, v in qbo_body.items() if v is not None}
+            response = await client.post_entity("customer", qbo_body)
+            return normalize_qbo_customer(response.get("Customer", {}))
+        
+        elif contact_type == "supplier":
+            qbo_body = {
+                "DisplayName": data["name"],
+                "PrimaryEmailAddr": {"Address": data.get("email")} if data.get("email") else None,
+                "PrintOnCheckName": data["name"],
+            }
+            qbo_body = {k: v for k, v in qbo_body.items() if v is not None}
+            response = await client.post_entity("vendor", qbo_body)
+            return normalize_qbo_vendor(response.get("Vendor", {}))
+        
+        else:
+            raise_invalid_request("quickbooks", f"Invalid contact type: {contact_type}")
 
     async def record_payment(self, token, tenant_id, data):
         raise NotImplementedError("Coming in Build Prompt 5")
+
 
 

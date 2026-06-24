@@ -162,3 +162,26 @@ def test_normalize_qbo_account():
         "tax_type": "TAX-US",
         "currency_code": "USD",
     }
+
+
+def test_build_qbo_lines_from_items():
+    from adapters.qbo import build_qbo_lines_from_items
+    items = [
+        {
+            "description": "Custom Widget",
+            "quantity": 3.0,
+            "unit_amount": 1050,  # 10.50
+        }
+    ]
+    lines = build_qbo_lines_from_items(items)
+    assert len(lines) == 1
+    assert lines[0] == {
+        "Amount": 31.50,
+        "DetailType": "SalesItemLineDetail",
+        "SalesItemLineDetail": {
+            "ItemRef": {"value": "1", "name": "Custom Widget"},
+            "Qty": 3.0,
+            "UnitPrice": 10.50,
+        }
+    }
+
