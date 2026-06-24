@@ -116,7 +116,7 @@ erp_connector/
 | **Ankita Patil** | QBO Adapter | `adapters/qbo.py` only |
 | **Samreen Shaikh** | Xero Adapter | `adapters/xero.py` only |
 
-> ⚠️ **Dev 2 and Dev 3 must not modify any file outside their adapter file without team consensus.**
+
 
 ---
 
@@ -172,7 +172,6 @@ uvicorn main:app --reload --port 8000
 | `QBO_TOKEN` | For QBO | — | Intuit OAuth 2.0 access token (~60-min expiry) |
 | `QBO_REALM_ID` | For QBO | — | QuickBooks Online Company/Realm ID |
 
-> 🔒 **Never commit `.env` to git.** It is gitignored.
 
 ---
 
