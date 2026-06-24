@@ -6,9 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from config.settings import get_settings
 from utils.errors import AppError, handle_app_error, handle_generic_error, ERPConnectorError, handle_erp_connector_error
-from utils.logger import correlation_id_var, get_logger
+from utils.logger import request_id_var, get_logger, generate_request_id
 
-logger = get_logger("main")
+logger = get_logger("erp_connector")
 
 # ---------------------------------------------------------------------------
 # Load & validate config at import time — fails fast on bad ERP_TYPE
@@ -32,18 +32,45 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 class CorrelationIDMiddleware(BaseHTTPMiddleware):
     """
-    Injects a unique X-Correlation-ID into every request context and response.
-    Uses the caller-supplied value if present, otherwise generates one.
+    Middleware that generates/extracts a request-scoped correlation ID,
+    stores it in a contextvar, and logs the request-response lifecycle events.
     """
     async def dispatch(self, request: Request, call_next):
-        corr_id = request.headers.get("X-Correlation-ID") or f"req-{uuid.uuid4()}"
-        token = correlation_id_var.set(corr_id)
+        import time
+        request_id = request.headers.get("X-Correlation-ID") or generate_request_id()
+        tenant_id = request.headers.get("X-ERP-Tenant-Id", "unknown")
+        
+        token = request_id_var.set(request_id)
+        
+        # Log request received: method, path, tenant_id, request_id (never token)
+        logger.info(
+            f"Request received: {request.method} {request.url.path}",
+            extra={"tenant_id": tenant_id, "request_id": request_id}
+        )
+        
+        start_time = time.perf_counter()
         try:
             response = await call_next(request)
-            response.headers["X-Correlation-ID"] = corr_id
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
+            
+            # Log response returned: status_code, duration_ms
+            logger.info(
+                f"Response returned: {response.status_code}",
+                extra={"status_code": response.status_code, "duration_ms": duration_ms}
+            )
+            
+            response.headers["X-Correlation-ID"] = request_id
             return response
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
+            logger.error(
+                f"Request failed: {str(exc)}",
+                exc_info=True,
+                extra={"duration_ms": duration_ms}
+            )
+            raise
         finally:
-            correlation_id_var.reset(token)
+            request_id_var.reset(token)
 
 
 # ---------------------------------------------------------------------------
