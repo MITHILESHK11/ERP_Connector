@@ -553,8 +553,107 @@ class QBOAdapter(BaseERPAdapter):
         else:
             raise_invalid_request("quickbooks", f"Invalid contact type: {contact_type}")
 
-    async def record_payment(self, token, tenant_id, data):
-        raise NotImplementedError("Coming in Build Prompt 5")
+    async def record_payment(self, token: str, tenant_id: str, data: dict) -> dict:
+        """
+        Record a payment against a QBO Invoice.
+        
+        Incoming data fields:
+          invoice_id   → the QBO Invoice Id to pay
+          amount       → payment amount in smallest unit (paise/cents) — divide by 100
+          date         → payment date (YYYY-MM-DD)
+          account_code → deposit account Id in QBO (e.g. bank account)
+        
+        Process:
+          1. Fetch the invoice to get CustomerRef.value (required for Payment)
+          2. Create a Payment entity with LinkedTxn pointing to the invoice
+          3. Return the normalised payment result
+        """
+        client = QBOHttpClient(token, tenant_id)
+        invoice_id = data["invoice_id"]
+        amount_float = data["amount"] / 100
+        
+        # Step 1: Fetch invoice to get CustomerRef
+        invoice_response = await client.get_entity("invoice", invoice_id)
+        raw_invoice = invoice_response.get("Invoice", {})
+        if not raw_invoice:
+            from utils.errors import raise_not_found
+            raise_not_found("quickbooks", f"Invoice {invoice_id}")
+        
+        customer_ref_value = raw_invoice.get("CustomerRef", {}).get("value")
+        if not customer_ref_value:
+            raise_invalid_request("quickbooks", 
+                "Invoice has no CustomerRef — cannot record payment")
+        
+        # Step 2: Create the Payment entity
+        payment_body = {
+            "TotalAmt": amount_float,
+            "CustomerRef": { "value": customer_ref_value },
+            "DepositToAccountRef": { "value": data.get("account_code", "1") },
+            "TxnDate": data["date"],
+            "Line": [
+                {
+                    "Amount": amount_float,
+                    "LinkedTxn": [
+                        { "TxnId": invoice_id, "TxnType": "Invoice" }
+                    ]
+                }
+            ]
+        }
+        
+        response = await client.post_entity("payment", payment_body)
+        raw_payment = response.get("Payment", {})
+        
+        logger.info(
+            f"Payment recorded for invoice={invoice_id} "
+            f"amount={amount_float} realm_id={tenant_id}"
+        )
+        
+        # Return a clean success response (not a normalised entity — payment is just a receipt)
+        return {
+            "success": True,
+            "payment_id": raw_payment.get("Id"),
+            "invoice_id": invoice_id,
+            "amount": data["amount"],
+            "date": data["date"],
+        }
+
+    async def update_invoice(self, token: str, tenant_id: str, 
+                             invoice_id: str, data: dict) -> dict:
+        """
+        Update a QBO Invoice. Requires SyncToken — fetched internally.
+        
+        CRITICAL RULE:
+        1. Fetch the full invoice (to get SyncToken and complete object)
+        2. Merge the caller's changes INTO the full object
+        3. POST the complete merged object with SyncToken
+        
+        Never send partial fields — missing fields will be set to null by QBO.
+        'sparse: true' allows partial updates but test this carefully in sandbox first.
+        """
+        client = QBOHttpClient(token, tenant_id)
+        
+        # Step 1: Fetch current entity + SyncToken
+        sync_token, full_invoice = await get_entity_with_sync_token(
+            client, "invoice", invoice_id
+        )
+        
+        # Step 2: Merge caller's changes into the full entity
+        # Only update fields that are explicitly passed — don't null others
+        if "due_date" in data:
+            full_invoice["DueDate"] = data["due_date"]
+        if "date" in data:
+            full_invoice["TxnDate"] = data["date"]
+        
+        # Always include SyncToken and Id
+        full_invoice["SyncToken"] = sync_token
+        full_invoice["Id"] = invoice_id
+        full_invoice["sparse"] = True  # Safe partial update mode
+        
+        # Step 3: POST the full updated object
+        response = await client.post_entity("invoice", full_invoice)
+        raw = response.get("Invoice", {})
+        return normalize_qbo_invoice(raw)
+
 
 
 

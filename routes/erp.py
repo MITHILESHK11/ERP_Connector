@@ -172,6 +172,27 @@ async def create_invoice(
     return _ok(data)
 
 
+@router.put(
+    "/invoices/{invoice_id}",
+    tags=["invoices"],
+    summary="Update an existing invoice",
+    response_description="Updated NormalizedInvoice object",
+)
+async def update_invoice(
+    invoice_id: str,
+    headers=Depends(require_erp_auth),
+    adapter=Depends(get_adapter),
+    payload: dict = Body(...),
+):
+    token, tenant_id = headers
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, f"PUT /invoices/{invoice_id}"):
+        data = await adapter.update_invoice(
+            token=token, tenant_id=tenant_id, invoice_id=invoice_id, data=payload
+        )
+    return _ok(data)
+
+
 # ---------------------------------------------------------------------------
 # TAG: bills
 # ---------------------------------------------------------------------------

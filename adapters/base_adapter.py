@@ -171,11 +171,29 @@ class BaseERPAdapter(ABC):
         Record a payment against an invoice or a bill in the ERP.
         
         Args:
-            token (str): The OAuth 2.0 access token.
-            tenant_id (str): The tenant/realm/organisation identifier.
-            data (dict): The payment data containing the payment amount, date, and reference to the invoice/bill.
+          token (str): The OAuth 2.0 access token.
+          tenant_id (str): The tenant/realm/organisation identifier.
+          data (dict): The payment data containing the payment amount, date, and reference to the invoice/bill.
 
         Returns:
-            dict: Details of the recorded payment, normalized to the ERP-specific payment schema representation.
+          dict: Details of the recorded payment, normalized to the ERP-specific payment schema representation.
         """
         pass
+
+    @abstractmethod
+    async def update_invoice(self, token: str, tenant_id: str, 
+                             invoice_id: str, data: dict) -> dict:
+        """
+        Update an existing invoice in the ERP.
+        
+        Args:
+          token (str): The OAuth 2.0 access token.
+          tenant_id (str): The tenant/realm/organisation identifier.
+          invoice_id (str): The unique invoice ID in the ERP system.
+          data (dict): The fields to update.
+
+        Returns:
+          dict: The updated invoice details mapped to the NormalizedInvoice Pydantic schema.
+        """
+        pass
+

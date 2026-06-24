@@ -185,3 +185,128 @@ def test_build_qbo_lines_from_items():
         }
     }
 
+
+@pytest.mark.asyncio
+async def test_record_payment():
+    from unittest.mock import AsyncMock, patch
+    
+    with patch("adapters.qbo.QBOHttpClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client_cls.return_value = mock_client
+        
+        mock_client.get_entity.return_value = {
+            "Invoice": {
+                "Id": "100",
+                "CustomerRef": {"value": "cust-99"},
+            }
+        }
+        
+        mock_client.post_entity.return_value = {
+            "Payment": {
+                "Id": "pay-777",
+            }
+        }
+        
+        from adapters.qbo import QBOAdapter
+        adapter = QBOAdapter()
+        
+        data = {
+            "invoice_id": "100",
+            "amount": 5000,
+            "date": "2026-06-15",
+            "account_code": "bank-1",
+        }
+        
+        result = await adapter.record_payment("test_token", "test_realm", data)
+        
+        mock_client.get_entity.assert_called_once_with("invoice", "100")
+        mock_client.post_entity.assert_called_once_with(
+            "payment",
+            {
+                "TotalAmt": 50.0,
+                "CustomerRef": {"value": "cust-99"},
+                "DepositToAccountRef": {"value": "bank-1"},
+                "TxnDate": "2026-06-15",
+                "Line": [
+                    {
+                        "Amount": 50.0,
+                        "LinkedTxn": [
+                            {"TxnId": "100", "TxnType": "Invoice"}
+                        ]
+                    }
+                ]
+            }
+        )
+        
+        assert result == {
+            "success": True,
+            "payment_id": "pay-777",
+            "invoice_id": "100",
+            "amount": 5000,
+            "date": "2026-06-15",
+        }
+
+
+@pytest.mark.asyncio
+async def test_update_invoice():
+    from unittest.mock import AsyncMock, patch
+    
+    with patch("adapters.qbo.QBOHttpClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client_cls.return_value = mock_client
+        
+        mock_client.get_entity.return_value = {
+            "Invoice": {
+                "Id": "100",
+                "SyncToken": "2",
+                "DocNumber": "INV-0001",
+                "TxnDate": "2026-06-01",
+                "DueDate": "2026-06-30",
+                "TotalAmt": 150.0,
+                "Line": [],
+                "CustomerRef": {"value": "cust-99"},
+            }
+        }
+        
+        mock_client.post_entity.return_value = {
+            "Invoice": {
+                "Id": "100",
+                "SyncToken": "3",
+                "DocNumber": "INV-0001",
+                "TxnDate": "2026-06-01",
+                "DueDate": "2026-09-30",
+                "TotalAmt": 150.0,
+                "Line": [],
+                "CustomerRef": {"value": "cust-99"},
+            }
+        }
+        
+        from adapters.qbo import QBOAdapter
+        adapter = QBOAdapter()
+        
+        data = {
+            "due_date": "2026-09-30",
+        }
+        
+        result = await adapter.update_invoice("test_token", "test_realm", "100", data)
+        
+        mock_client.get_entity.assert_called_once_with("invoice", "100")
+        mock_client.post_entity.assert_called_once_with(
+            "invoice",
+            {
+                "Id": "100",
+                "SyncToken": "2",
+                "DocNumber": "INV-0001",
+                "TxnDate": "2026-06-01",
+                "DueDate": "2026-09-30",
+                "TotalAmt": 150.0,
+                "Line": [],
+                "CustomerRef": {"value": "cust-99"},
+                "sparse": True,
+            }
+        )
+        
+        assert result["id"] == "100"
+        assert result["due_date"] == "2026-09-30"
+
+
