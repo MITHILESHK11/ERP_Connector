@@ -68,8 +68,8 @@ erp_connector/
 ├── adapters/
 │   ├── __init__.py                # Adapter registry — get_adapter() factory  ← Dev 1 ✅
 │   ├── base_adapter.py            # Abstract interface all adapters must implement  ← Dev 1 ✅
-│   ├── xero.py                    # Xero adapter implementation  ← Dev 2 🔄
-│   └── qbo.py                     # QBO adapter implementation  ← Dev 3 🔄
+│   ├── xero.py                    # Xero adapter implementation  ← Dev 2 ✅
+│   └── qbo.py                     # QBO adapter implementation  ← Dev 3 ✅
 │
 ├── config/
 │   ├── __init__.py
