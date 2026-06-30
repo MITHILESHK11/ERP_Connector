@@ -3,3 +3,5 @@
 .qbo_tokens.json
 __pycache__/
 *.pyc
+.xero_tokens.json
+.venv/
