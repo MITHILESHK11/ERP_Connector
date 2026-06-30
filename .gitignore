@@ -1,0 +1,5 @@
+﻿.env
+.erp_tokens.json
+.qbo_tokens.json
+__pycache__/
+*.pyc
