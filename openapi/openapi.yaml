@@ -638,18 +638,18 @@ components:
       name: X-ERP-Token
       in: header
       required: false
-      description: Access token prefixed with Bearer or raw OAuth access token
+      description: OAuth 2.0 Access Token (e.g., Xero Access Token or QuickBooks Access Token)
       schema:
         type: string
-        example: "Bearer eyJhbGciOiJSUzI1Ni..."
+        example: "eyJhbGciOiJSUzI1Ni..."
     X-ERP-Tenant-Id:
       name: X-ERP-Tenant-Id
       in: header
-      required: false
-      description: Upstream ERP organisation or tenant ID
+      required: true
+      description: Tenant ID (Xero Tenant/Organisation ID or QuickBooks Realm/Company ID)
       schema:
         type: string
-        example: "tenant-12345"
+        example: "tenant-or-realm-id-123"
 
   responses:
     Error400:

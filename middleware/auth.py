@@ -4,7 +4,6 @@ from config.settings import get_settings
 from utils.errors import raise_token_expired
 from utils.rate_limiter import check_rate_limit
 
-
 def _get_credentials_from_manager(erp_type: str) -> Tuple[Optional[str], Optional[str]]:
     """Try to get active token and tenant_id from token_manager for the configured ERP."""
     try:
@@ -15,17 +14,15 @@ def _get_credentials_from_manager(erp_type: str) -> Tuple[Optional[str], Optiona
     except Exception:
         return None, None
 
-
 async def require_erp_auth(
     x_erp_token: Optional[str] = Header(None, alias="X-ERP-Token"),
     x_erp_tenant_id: Optional[str] = Header(None, alias="X-ERP-Tenant-Id"),
 ) -> Tuple[str, str]:
     """
     FastAPI dependency to extract and validate X-ERP-Token and X-ERP-Tenant-Id headers.
-    If headers are omitted, automatically retrieves active credentials from
-    token_manager for the currently configured ERP.
+    If headers are omitted, automatically retrieves active credentials from token_manager for any configured ERP.
     Strips the 'Bearer ' prefix and enforces the rate limiter.
-
+    
     Returns:
         Tuple[str, str]: A tuple of (clean_token, tenant_id).
     """

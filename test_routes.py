@@ -1,7 +1,7 @@
 import asyncio
 import httpx
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8080"
 
 async def run_manual_routes_check():
     from token_manager import get_valid_token, get_tenant_id

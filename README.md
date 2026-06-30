@@ -151,10 +151,10 @@ copy .env.example .env        # Windows
 ### Run the server
 
 ```bash
-uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --port 8080
 ```
 
-**Swagger UI** → [http://localhost:8000/erp/docs](http://localhost:8000/erp/docs)
+**Swagger UI** → [http://localhost:8080/erp/docs](http://localhost:8080/erp/docs)
 
 ---
 
@@ -162,8 +162,8 @@ uvicorn main:app --reload --port 8000
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ERP_TYPE` | ✅ Yes | — | Must be `xero` or `quickbooks`. Fails at startup if missing. |
-| `PORT` | No | `8000` | Server port |
+| `ERP_TYPE` | ✅ Yes | — | Must be `xero` or `quickbooks` (or `qbo`). Fails at startup if missing. |
+| `PORT` | No | `8080` | Server port |
 | `LOG_LEVEL` | No | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 | `CORS_ORIGIN` | No | `*` | Restrict in production |
 | `APP_VERSION` | No | `0.1.0` | Reported in `/erp/health` |

@@ -1,7 +1,10 @@
-﻿.env
-.erp_tokens.json
-.qbo_tokens.json
+.env
 __pycache__/
+.pytest_cache/
 *.pyc
-.xero_tokens.json
 .venv/
+*.log
+*.pdf
+*.docx
+.xero_tokens.json
+.erp_tokens.json
