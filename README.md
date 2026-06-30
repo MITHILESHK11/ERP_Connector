@@ -311,5 +311,5 @@ pytest -v
 
 ---
 
-*ERP Connector — Phase 0 | Python FastAPI | June 2026*
+*ERP Connector | Python FastAPI | June 2026*
 
