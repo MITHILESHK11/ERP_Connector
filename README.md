@@ -110,11 +110,11 @@ erp_connector/
 
 ## Team & Ownership
 
-| Developer | Role | Owns |
-|-----------|------|------|
-| **Mithilesh Kolhapurkar** | Core Engine | `main.py`, `config/`, `models/schemas.py`, `routes/`, `utils/`, `adapters/__init__.py`, `adapters/base_adapter.py` |
-| **Ankita Patil** | QBO Adapter | `adapters/qbo.py` only |
-| **Samreen Shaikh** | Xero Adapter | `adapters/xero.py` only |
+| Developer | Role | Component Ownership | Status |
+|-----------|------|--------------------|--------|
+| **Mithilesh Kolhapurkar** | Core Engine | `main.py`, `config/`, `models/schemas.py`, `routes/`, `utils/`, `adapters/__init__.py` | ✅ Complete (Production Ready) |
+| **Ankita Patil** | QBO Adapter | `adapters/qbo.py` (QuickBooks Integration) | ✅ Complete (Production Ready) |
+| **Samreen Shaikh** | Xero Adapter | `adapters/xero.py` (Xero Integration) | ✅ Complete (Production Ready) |
 
 
 
