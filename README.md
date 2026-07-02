@@ -224,6 +224,7 @@ All endpoints require two custom headers (except `/erp/health`):
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| `GET` | `/erp/payments` | List recorded payments |
 | `POST` | `/erp/payments` | Record a payment against an invoice or bill |
 
 ### Response Envelope

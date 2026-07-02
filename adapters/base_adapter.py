@@ -197,3 +197,18 @@ class BaseERPAdapter(ABC):
         """
         pass
 
+    @abstractmethod
+    async def get_payments(self, token: str, tenant_id: str) -> list[dict]:
+        """
+        Fetch a list of payments from the ERP and normalize them.
+        
+        Args:
+          token (str): The OAuth 2.0 access token.
+          tenant_id (str): The tenant/realm/organisation identifier.
+
+        Returns:
+          list[dict]: A list of dictionaries matching the NormalizedPayment Pydantic schema.
+        """
+        pass
+
+

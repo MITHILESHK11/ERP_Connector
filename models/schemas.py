@@ -309,3 +309,27 @@ class RecordPaymentRequest(BaseModel):
             raise ValueError("Date must be in YYYY-MM-DD format and be a valid calendar date.")
         return v
 
+
+class NormalizedPayment(BaseModel):
+    id: str = Field(
+        ..., 
+        description="Unique identifier for the payment. Xero=PaymentID, QBO=Id"
+    )
+    invoice_id: str = Field(
+        ..., 
+        description="Associated invoice or bill ID. Xero=Invoice.InvoiceID, QBO=InvoiceRef.value"
+    )
+    amount: int = Field(
+        ..., 
+        description="Payment amount in smallest currency unit (e.g. cents/paise). Xero=Amount, QBO=TotalAmt"
+    )
+    date: str = Field(
+        ..., 
+        description="Payment date in ISO 8601 (YYYY-MM-DD). Xero=Date, QBO=TxnDate"
+    )
+    account_code: str = Field(
+        ..., 
+        description="GL Account code or bank account reference. Xero=Account.Code, QBO=DepositToAccountRef.value"
+    )
+
+

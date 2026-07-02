@@ -540,3 +540,36 @@ class XeroAdapter(BaseERPAdapter):
             raise_erp_timeout("xero")
         except httpx.RequestError:
             raise_erp_unavailable("xero")
+
+    # ----------------------------------------------------------------
+    # GET PAYMENTS
+    # ----------------------------------------------------------------
+    async def get_payments(self, token: str, tenant_id: str) -> list[dict]:
+        headers = self._get_headers(token, tenant_id)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"{XERO_BASE_URL}/Payments",
+                    headers=headers
+                )
+                self._check_response(response, "/Payments (List)")
+                result = response.json()
+                payments = result.get("Payments", [])
+                normalized = []
+                for p in payments:
+                    inv_id = p.get("Invoice", {}).get("InvoiceID") or p.get("CreditNote", {}).get("CreditNoteID") or ""
+                    date_str = p.get("Date")
+                    if date_str and len(date_str) >= 10:
+                        date_str = date_str[:10]
+                    normalized.append({
+                        "id": str(p.get("PaymentID", "")),
+                        "invoice_id": str(inv_id),
+                        "amount": int(round(float(p.get("Amount", 0) or 0) * 100)),
+                        "date": date_str or "",
+                        "account_code": str(p.get("Account", {}).get("Code") or p.get("Account", {}).get("AccountID") or ""),
+                    })
+                return normalized
+        except httpx.TimeoutException:
+            raise_erp_timeout("xero")
+        except httpx.RequestError:
+            raise_erp_unavailable("xero")

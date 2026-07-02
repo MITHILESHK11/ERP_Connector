@@ -695,6 +695,36 @@ class QBOAdapter(BaseERPAdapter):
         raw = response.get("Invoice", {})
         return normalize_qbo_invoice(raw)
 
+    async def get_payments(self, token: str, tenant_id: str) -> list[dict]:
+        """
+        Fetch all payments from QuickBooks Online and normalize them.
+        """
+        client = QBOHttpClient(token, tenant_id)
+        # Query all payments
+        response = await client.query("select * from Payment")
+        raw_payments = extract_query_results(response, "Payment")
+        
+        normalized = []
+        for p in raw_payments:
+            inv_id = ""
+            for line in p.get("Line", []):
+                for linked in line.get("LinkedTxn", []):
+                    if linked.get("TxnType") in ("Invoice", "Bill"):
+                        inv_id = linked.get("TxnId")
+                        break
+                if inv_id:
+                    break
+            
+            normalized.append({
+                "id": str(p.get("Id", "")),
+                "invoice_id": str(inv_id),
+                "amount": int(round(float(p.get("TotalAmt") or 0.0) * 100)),
+                "date": p.get("TxnDate", ""),
+                "account_code": str(p.get("DepositToAccountRef", {}).get("value") or ""),
+            })
+        return normalized
+
+
 
 
 

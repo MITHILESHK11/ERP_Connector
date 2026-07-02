@@ -574,6 +574,53 @@ paths:
           $ref: "#/components/responses/Error504"
 
   /erp/payments:
+    get:
+      summary: List recorded payments
+      description: Retrieve recorded payments from the active ERP.
+      parameters:
+        - $ref: "#/components/parameters/X-ERP-Token"
+        - $ref: "#/components/parameters/X-ERP-Tenant-Id"
+      responses:
+        "200":
+          description: Successful retrieval
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - erp
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  erp:
+                    type: string
+                    example: xero
+                  correlationId:
+                    type: string
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  count:
+                    type: integer
+                    example: 1
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NormalizedPayment"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "502":
+          $ref: "#/components/responses/Error502"
+        "504":
+          $ref: "#/components/responses/Error504"
+
     post:
       summary: Record a payment
       description: Record a payment transaction against an invoice or vendor bill in the ERP.
@@ -1070,3 +1117,30 @@ components:
         account_code:
           type: string
           example: "120"
+
+    NormalizedPayment:
+      type: object
+      required:
+        - id
+        - invoice_id
+        - amount
+        - date
+        - account_code
+      properties:
+        id:
+          type: string
+          example: "pay-12345"
+        invoice_id:
+          type: string
+          example: "inv-12345"
+        amount:
+          type: integer
+          example: 5000
+        date:
+          type: string
+          format: date
+          example: "2026-06-08"
+        account_code:
+          type: string
+          example: "120"
+

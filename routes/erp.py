@@ -15,7 +15,7 @@ from utils.errors import (
 from utils.rate_limiter import check_rate_limit
 from utils.logger import correlation_id_var, get_logger
 from adapters import get_adapter as _registry_get_adapter
-from models.schemas import CreateInvoiceRequest, CreateBillRequest, CreateContactRequest, RecordPaymentRequest
+from models.schemas import CreateInvoiceRequest, CreateBillRequest, CreateContactRequest, RecordPaymentRequest, NormalizedPayment
 from middleware.auth import require_erp_auth
 
 router = APIRouter(prefix="/erp")
@@ -360,3 +360,21 @@ async def record_payment(
     async with handle_adapter_errors(erp, tenant_id, "POST /payments"):
         data = await adapter.record_payment(token=token, tenant_id=tenant_id, data=payload.model_dump())
     return _ok(data)
+
+
+@router.get(
+    "/payments",
+    tags=["payments"],
+    summary="List payments",
+    response_description="List of NormalizedPayment objects",
+)
+async def list_payments(
+    headers=Depends(require_erp_auth),
+    adapter=Depends(get_adapter),
+):
+    token, tenant_id = headers
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, "GET /payments"):
+        data = await adapter.get_payments(token=token, tenant_id=tenant_id)
+    return _ok(data, count=len(data))
+
