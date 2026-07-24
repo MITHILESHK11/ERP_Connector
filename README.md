@@ -82,28 +82,28 @@ erp_connector/
 ├── requirements.txt
 │
 ├── adapters/
-│   ├── __init__.py                # Adapter registry — get_adapter() factory  ← Dev 1 ✅
-│   ├── base_adapter.py            # Abstract interface all adapters must implement  ← Dev 1 ✅
-│   ├── xero.py                    # Xero adapter implementation  ← Dev 2 🔄
-│   └── qbo.py                     # QBO adapter implementation  ← Dev 3 🔄
+│   ├── __init__.py                # Adapter registry — get_adapter() factory
+│   ├── base_adapter.py            # Abstract interface all adapters must implement
+│   ├── xero.py                    # Xero adapter implementation
+│   └── qbo.py                     # QBO adapter implementation
 │
 ├── config/
 │   ├── __init__.py
-│   └── settings.py                # Loads & validates env vars at startup  ← Dev 1 ✅
+│   └── settings.py                # Loads & validates env vars at startup
 │
 ├── models/
 │   ├── __init__.py
-│   └── schemas.py                 # Frozen Pydantic models (READ-ONLY contract)  ← Dev 1 ✅
+│   └── schemas.py                 # Frozen Pydantic models (READ-ONLY contract)
 │
 ├── routes/
 │   ├── __init__.py
-│   └── erp.py                     # All 12 API route stubs with OpenAPI tags  ← Dev 1 ✅
+│   └── erp.py                     # All 12 API route stubs with OpenAPI tags
 │
 ├── utils/
 │   ├── __init__.py
-│   ├── errors.py                  # Unified error builder & exception handlers  ← Dev 1 ✅
-│   ├── logger.py                  # Structured JSON logging, no token leakage  ← Dev 1 ✅
-│   ├── rate_limiter.py            # Token-bucket rate limiter per tenant  ← Dev 1 ✅
+│   ├── errors.py                  # Unified error builder & exception handlers
+│   ├── logger.py                  # Structured JSON logging, no token leakage
+│   ├── rate_limiter.py            # Token-bucket rate limiter per tenant
 │   └── pagination.py              # Pagination utility (placeholder)
 │
 └── tests/
@@ -113,7 +113,7 @@ erp_connector/
     │   ├── test_pagination.py
     │   └── test_schemas.py
     └── integration/
-        ├── test_health.py         ← ✅ Passing
+        ├── test_health.py         
         ├── test_invoices.py
         ├── test_bills.py
         ├── test_contacts.py
