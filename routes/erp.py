@@ -2,7 +2,7 @@ import datetime
 import httpx
 from contextlib import asynccontextmanager
 from typing import Optional, Any
-from fastapi import APIRouter, Depends, Header, Query, Body
+from fastapi import APIRouter, Depends, Query, Body
 from config.settings import get_settings
 from utils.errors import (
     AppError,
@@ -12,10 +12,10 @@ from utils.errors import (
     raise_erp_unavailable,
     raise_erp_timeout
 )
-from utils.rate_limiter import check_rate_limit
+from utils.rate_limiter import rate_limiter
 from utils.logger import correlation_id_var, get_logger
 from adapters import get_adapter as _registry_get_adapter
-from models.schemas import CreateInvoiceRequest, CreateBillRequest, CreateContactRequest, RecordPaymentRequest, NormalizedPayment
+from models.schemas import CreateInvoiceRequest, CreateBillRequest, CreateContactRequest, RecordPaymentRequest
 from middleware.auth import require_erp_auth
 
 router = APIRouter(prefix="/erp")
@@ -50,7 +50,12 @@ async def handle_adapter_errors(erp: str, tenant_id: str, endpoint: str):
         extra={"erp": erp, "endpoint": endpoint, "tenant_id": tenant_id}
     )
     try:
-        yield
+        # The concurrency limiter (max 10 simultaneous QBO calls per tenant)
+        # is wired in here so every adapter call funneled through this
+        # context manager is subject to the limit. limit_concurrency() is a
+        # no-op for non-QBO ERPs, so this is safe for Xero too.
+        async with rate_limiter.limit_concurrency(tenant_id):
+            yield
     except httpx.TimeoutException:
         raise_erp_timeout(erp)
     except httpx.HTTPStatusError as exc:
@@ -291,11 +296,17 @@ async def get_contact(
     contact_id: str,
     headers=Depends(require_erp_auth),
     adapter=Depends(get_adapter),
+    contact_type: Optional[str] = Query(
+        None, alias="type",
+        description="customer | supplier — disambiguates when a contact_id could match either (e.g. QBO ID collisions)"
+    ),
 ):
     token, tenant_id = headers
     erp = get_settings().ERP_TYPE
     async with handle_adapter_errors(erp, tenant_id, f"GET /contacts/{contact_id}"):
-        data = await adapter.get_contact(token=token, tenant_id=tenant_id, contact_id=contact_id)
+        data = await adapter.get_contact(
+            token=token, tenant_id=tenant_id, contact_id=contact_id, contact_type=contact_type
+        )
     return _ok(data)
 
 
@@ -339,6 +350,24 @@ async def list_accounts(
     return _ok(data, count=len(data))
 
 
+@router.get(
+    "/items",
+    tags=["accounts"],
+    summary="Fetch Products/Services (QBO Items) usable as invoice line item_id",
+    response_description="List of items. Empty list on ERPs (like Xero) without a separate Item entity.",
+)
+async def list_items(
+    headers=Depends(require_erp_auth),
+    adapter=Depends(get_adapter),
+):
+    token, tenant_id = headers
+    erp = get_settings().ERP_TYPE
+    async with handle_adapter_errors(erp, tenant_id, "GET /items"):
+        get_items_fn = getattr(adapter, "get_items", None)
+        data = await get_items_fn(token=token, tenant_id=tenant_id) if get_items_fn else []
+    return _ok(data, count=len(data))
+
+
 # ---------------------------------------------------------------------------
 # TAG: payments
 # ---------------------------------------------------------------------------
@@ -360,21 +389,3 @@ async def record_payment(
     async with handle_adapter_errors(erp, tenant_id, "POST /payments"):
         data = await adapter.record_payment(token=token, tenant_id=tenant_id, data=payload.model_dump())
     return _ok(data)
-
-
-@router.get(
-    "/payments",
-    tags=["payments"],
-    summary="List payments",
-    response_description="List of NormalizedPayment objects",
-)
-async def list_payments(
-    headers=Depends(require_erp_auth),
-    adapter=Depends(get_adapter),
-):
-    token, tenant_id = headers
-    erp = get_settings().ERP_TYPE
-    async with handle_adapter_errors(erp, tenant_id, "GET /payments"):
-        data = await adapter.get_payments(token=token, tenant_id=tenant_id)
-    return _ok(data, count=len(data))
-

@@ -8,3 +8,6 @@ __pycache__/
 *.docx
 .xero_tokens.json
 .erp_tokens.json
+.qbo_tokens.json
+.env.local
+.erp_credentials.json

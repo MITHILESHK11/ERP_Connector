@@ -1,1 +1,10 @@
-# placeholder
+fastapi
+uvicorn
+python-dotenv
+httpx
+pydantic
+pyyaml
+pytest
+pytest-asyncio
+python-multipart
+tenacity

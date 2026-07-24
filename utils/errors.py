@@ -2,7 +2,7 @@ import datetime
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
-from utils.logger import correlation_id_var, get_logger
+from utils.logger import get_logger
 from config.settings import get_settings
 
 logger = get_logger("errors")

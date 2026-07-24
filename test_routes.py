@@ -17,7 +17,7 @@ async def run_manual_routes_check():
     async with httpx.AsyncClient(timeout=30) as client:
         
         # Test 1 - Health
-        r = await client.get(f"{BASE_URL}/healthz")
+        r = await client.get(f"{BASE_URL}/erp/health")
         print("Health:", r.json())
         
         # Test 2 - All invoices

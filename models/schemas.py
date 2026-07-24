@@ -1,6 +1,5 @@
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
-from datetime import datetime
 
 # ==========================================
 # LINE ITEM SCHEMAS
@@ -219,18 +218,23 @@ class ErrorResponse(BaseModel):
 # ==========================================
 
 class LineItem(BaseModel):
-    description: str = Field(..., min_length=1)
-    quantity: float = Field(..., gt=0)
-    unit_amount: int = Field(..., gt=0)
-    account_code: str = Field(...)
+    description: str = Field(..., min_length=1, examples=["Consulting services"])
+    quantity: float = Field(..., gt=0, examples=[1])
+    unit_amount: int = Field(..., gt=0, examples=[10000])
+    account_code: str = Field(..., examples=["200"])
     tax_type: Optional[str] = None
+    item_id: Optional[str] = Field(
+        None,
+        description="QBO Item ID for this line (QuickBooks only — required to charge the correct product/service; falls back to account_code if omitted, then '1')",
+        examples=["5"]
+    )
 
 
 class CreateInvoiceRequest(BaseModel):
-    contact_id: str = Field(...)
-    date: str = Field(...)
-    due_date: str = Field(...)
-    currency: str = Field(..., pattern=r"^[A-Z]{3}$")
+    contact_id: str = Field(..., examples=["55"])
+    date: str = Field(..., examples=["2026-07-01"])
+    due_date: str = Field(..., examples=["2026-07-15"])
+    currency: str = Field(..., pattern=r"^[A-Z]{3}$", examples=["USD"])
     line_items: List[LineItem] = Field(..., min_length=1)
 
     @field_validator("date", "due_date")
@@ -257,10 +261,10 @@ class CreateInvoiceRequest(BaseModel):
 
 
 class CreateBillRequest(BaseModel):
-    supplier_id: str = Field(...)
-    date: str = Field(...)
-    due_date: str = Field(...)
-    currency: str = Field(..., pattern=r"^[A-Z]{3}$")
+    supplier_id: str = Field(..., examples=["21"])
+    date: str = Field(..., examples=["2026-07-01"])
+    due_date: str = Field(..., examples=["2026-07-15"])
+    currency: str = Field(..., pattern=r"^[A-Z]{3}$", examples=["USD"])
     line_items: List[LineItem] = Field(..., min_length=1)
 
     @field_validator("date", "due_date")
@@ -287,17 +291,17 @@ class CreateBillRequest(BaseModel):
 
 
 class CreateContactRequest(BaseModel):
-    name: str = Field(...)
-    email: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+    name: str = Field(..., examples=["Acme Corp"])
+    email: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", examples=["billing@acme.com"])
     phone: Optional[str] = None
-    type: Literal["customer", "supplier"] = Field(...)
+    type: Literal["customer", "supplier"] = Field(..., examples=["customer"])
 
 
 class RecordPaymentRequest(BaseModel):
-    invoice_id: str = Field(...)
-    amount: int = Field(..., gt=0)
-    date: str = Field(...)
-    account_code: str = Field(...)
+    invoice_id: str = Field(..., examples=["9001"])
+    amount: int = Field(..., gt=0, examples=[5000])
+    date: str = Field(..., examples=["2026-07-01"])
+    account_code: str = Field(..., examples=["35"])
 
     @field_validator("date")
     @classmethod
@@ -308,28 +312,3 @@ class RecordPaymentRequest(BaseModel):
         except ValueError:
             raise ValueError("Date must be in YYYY-MM-DD format and be a valid calendar date.")
         return v
-
-
-class NormalizedPayment(BaseModel):
-    id: str = Field(
-        ..., 
-        description="Unique identifier for the payment. Xero=PaymentID, QBO=Id"
-    )
-    invoice_id: str = Field(
-        ..., 
-        description="Associated invoice or bill ID. Xero=Invoice.InvoiceID, QBO=InvoiceRef.value"
-    )
-    amount: int = Field(
-        ..., 
-        description="Payment amount in smallest currency unit (e.g. cents/paise). Xero=Amount, QBO=TotalAmt"
-    )
-    date: str = Field(
-        ..., 
-        description="Payment date in ISO 8601 (YYYY-MM-DD). Xero=Date, QBO=TxnDate"
-    )
-    account_code: str = Field(
-        ..., 
-        description="GL Account code or bank account reference. Xero=Account.Code, QBO=DepositToAccountRef.value"
-    )
-
-

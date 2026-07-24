@@ -4,6 +4,18 @@ from main import app
 
 client = TestClient(app)
 
+@pytest.fixture(autouse=True)
+def mock_token_manager_empty(monkeypatch, request):
+    # Ensure local token files do not bypass authentication checks in negative test cases
+    if request.node.name in [
+        "test_invoices_endpoint_no_headers",
+        "test_invoices_endpoint_missing_token",
+        "test_invoices_endpoint_empty_token"
+    ]:
+        import middleware.auth
+        monkeypatch.setattr(middleware.auth, "_get_credentials_from_manager", lambda erp: (None, None))
+
+
 def test_health_endpoint_no_auth():
     # Hit health endpoint — should succeed without auth headers
     response = client.get("/erp/health")
@@ -53,6 +65,9 @@ def test_invoices_endpoint_empty_token():
 def test_invoices_endpoint_bearer_prefix_stripped(monkeypatch):
     # If valid headers are passed, should proceed past auth and hit adapter.
     # We patch the adapter method to avoid making actual external API calls.
+    from config.settings import get_settings
+    monkeypatch.setattr(get_settings(), "ERP_TYPE", "quickbooks")
+
     called = []
     async def mock_get_invoices(self, token, tenant_id, from_date=None, to_date=None, status=None):
         called.append((token, tenant_id))

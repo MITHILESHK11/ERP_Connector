@@ -1,5 +1,3 @@
-import uuid
-import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,9 +28,20 @@ logger.info(f"ERP Connector starting — ERP_TYPE={settings.ERP_TYPE.upper()}")
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+    from token_manager import background_token_refresh_loop
+
     logger.info("ERP Connector microservice is ready.")
-    yield
-    logger.info("ERP Connector microservice is shutting down.")
+    refresh_task = asyncio.create_task(background_token_refresh_loop())
+    try:
+        yield
+    finally:
+        refresh_task.cancel()
+        try:
+            await refresh_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("ERP Connector microservice is shutting down.")
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +98,7 @@ import yaml
 app = FastAPI(
     title="ERP Connector",
     version=settings.APP_VERSION,
-    description="Stateless REST wrapper for Xero and QuickBooks Online",
+    description="Unified REST wrapper for Xero and QuickBooks Online",
     docs_url="/erp/docs",
     redoc_url="/erp/redoc",
     lifespan=lifespan,
@@ -110,10 +119,14 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 # CORS
+# NOTE: browsers reject credentialed requests (allow_credentials=True) when
+# the origin is the wildcard "*" — the two are mutually exclusive per the
+# CORS spec. Only allow credentials when a specific origin is configured.
+_cors_is_wildcard = settings.CORS_ORIGIN.strip() == "*"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.CORS_ORIGIN],
-    allow_credentials=True,
+    allow_credentials=not _cors_is_wildcard,
     allow_methods=["*"],
     allow_headers=["X-ERP-Token", "X-ERP-Tenant-Id", "Content-Type"],
 )
@@ -128,5 +141,7 @@ app.add_exception_handler(RequestValidationError, handle_validation_error)
 app.add_exception_handler(Exception, handle_generic_error)
 
 # Routes
-from routes import erp  # noqa: E402 — imported after app creation intentionally
+from routes import erp, auth  # noqa: E402 — imported after app creation intentionally
+app.include_router(auth.router)
 app.include_router(erp.router)
+

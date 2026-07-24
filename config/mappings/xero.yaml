@@ -1,0 +1,41 @@
+# Field mapping for Xero -> common normalized schema.
+# Plain renames need only a `source`. Anything needing real logic points
+# at a named transform from utils/transforms.py instead of source.
+
+invoice:
+  id:               { source: "InvoiceID", transform: "stringify" }
+  reference_number: { transform: "xero_reference_number" }
+  date:             { transform: "xero_invoice_date" }
+  due_date:         { transform: "xero_invoice_due_date" }
+  amount:           { source: "Total", transform: "money_to_cents" }
+  currency:         { source: "CurrencyCode", default: "USD" }
+  status:           { transform: "xero_status" }          # derived, no single source field
+  contact_id:       { source: "Contact.ContactID", transform: "stringify" }
+  line_items:       { transform: "xero_line_items" }        # derived list, no single source field
+
+bill:
+  id:               { source: "InvoiceID", transform: "stringify" }
+  bill_number:      { transform: "xero_reference_number" }
+  date:             { transform: "xero_invoice_date" }
+  due_date:         { transform: "xero_invoice_due_date" }
+  amount:           { source: "Total", transform: "money_to_cents" }
+  currency:         { source: "CurrencyCode", default: "USD" }
+  status:           { transform: "xero_status" }
+  supplier_id:      { source: "Contact.ContactID", transform: "stringify" }
+  line_items:       { transform: "xero_line_items" }
+
+contact:
+  id:      { source: "ContactID", transform: "stringify" }
+  name:    { source: "Name" }
+  email:   { source: "EmailAddress" }
+  phone:   { transform: "xero_phone" }
+  type:    { transform: "xero_contact_type" }
+  address: { transform: "xero_address" }
+
+account:
+  id:            { source: "AccountID", transform: "stringify" }
+  code:          { source: "Code", transform: "stringify" }
+  name:          { source: "Name" }
+  type:          { source: "Type", transform: "lowercase" }
+  tax_type:      { source: "TaxType" }
+  currency_code: { source: "CurrencyCode" }

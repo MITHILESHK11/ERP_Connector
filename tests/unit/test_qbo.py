@@ -239,11 +239,11 @@ async def test_record_payment():
         )
         
         assert result == {
-            "success": True,
             "payment_id": "pay-777",
             "invoice_id": "100",
             "amount": 5000,
             "date": "2026-06-15",
+            "status": "success",
         }
 
 

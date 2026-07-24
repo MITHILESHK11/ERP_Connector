@@ -1,5 +1,28 @@
 from abc import ABC, abstractmethod
 
+ADAPTER_REGISTRY: dict[str, type] = {}
+
+
+def register_adapter(*names: str):
+    """
+    Class decorator — adapters register themselves under one or more names
+    (e.g. both "qbo" and "quickbooks") instead of adapters/__init__.py needing
+    an if/elif branch per ERP. Drop a new adapter file in adapters/, decorate
+    the class, import it once in adapters/__init__.py, and it's available —
+    no changes to the lookup logic itself.
+
+    Example:
+        @register_adapter("xero")
+        class XeroAdapter(BaseERPAdapter):
+            ...
+    """
+    def decorator(cls):
+        for name in names:
+            ADAPTER_REGISTRY[name.lower()] = cls
+        return cls
+    return decorator
+
+
 class BaseERPAdapter(ABC):
     """
     Abstract Base Class defining the interface for all ERP Adapters (e.g. XeroAdapter, QBOAdapter).
@@ -92,7 +115,8 @@ class BaseERPAdapter(ABC):
         pass
 
     @abstractmethod
-    async def get_contact(self, token: str, tenant_id: str, contact_id: str) -> dict:
+    async def get_contact(self, token: str, tenant_id: str, contact_id: str,
+                          contact_type: str = None) -> dict:
         """
         Fetch details of a single contact from the ERP by its ID and normalize it.
         
@@ -100,6 +124,8 @@ class BaseERPAdapter(ABC):
             token (str): The OAuth 2.0 access token.
             tenant_id (str): The tenant/realm/organisation identifier.
             contact_id (str): The unique contact ID in the ERP system.
+            contact_type (str, optional): 'customer' or 'supplier'. Disambiguates
+                ERPs (like QBO) where customer and vendor IDs can collide.
 
         Returns:
             dict: A dictionary matching the NormalizedContact Pydantic schema.
@@ -196,19 +222,4 @@ class BaseERPAdapter(ABC):
           dict: The updated invoice details mapped to the NormalizedInvoice Pydantic schema.
         """
         pass
-
-    @abstractmethod
-    async def get_payments(self, token: str, tenant_id: str) -> list[dict]:
-        """
-        Fetch a list of payments from the ERP and normalize them.
-        
-        Args:
-          token (str): The OAuth 2.0 access token.
-          tenant_id (str): The tenant/realm/organisation identifier.
-
-        Returns:
-          list[dict]: A list of dictionaries matching the NormalizedPayment Pydantic schema.
-        """
-        pass
-
 

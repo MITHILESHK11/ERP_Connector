@@ -1,0 +1,53 @@
+# Field mapping for QBO -> common normalized schema.
+# QBO genuinely has no single "status" field for invoices/bills (unlike Xero),
+# so status is a derived transform, not a plain rename — that's real business
+# logic, not something a config file alone could express.
+
+invoice:
+  id:               { source: "Id", transform: "stringify" }
+  reference_number: { source: "DocNumber" }
+  date:             { source: "TxnDate" }
+  due_date:         { source: "DueDate" }
+  amount:           { source: "TotalAmt", transform: "money_to_cents" }
+  currency:         { source: "CurrencyRef", transform: "qbo_ref_value", default: "USD" }
+  status:           { transform: "qbo_derive_status" }
+  contact_id:       { source: "CustomerRef", transform: "qbo_ref_value" }
+  line_items:       { transform: "qbo_line_items" }
+
+bill:
+  id:          { source: "Id", transform: "stringify" }
+  bill_number: { transform: "qbo_bill_number" }
+  date:        { source: "TxnDate" }
+  due_date:    { source: "DueDate" }
+  amount:      { source: "TotalAmt", transform: "money_to_cents" }
+  currency:    { source: "CurrencyRef", transform: "qbo_ref_value", default: "USD" }
+  status:      { transform: "qbo_bill_status" }
+  supplier_id: { source: "VendorRef", transform: "qbo_ref_value" }
+  line_items:  { transform: "qbo_bill_line_items" }
+
+# QBO has two separate contact concepts (Customer / Vendor) with slightly
+# different fields (e.g. Vendor prefers PrintOnCheckName). `contact_type`
+# picks which sub-mapping applies -- still config, no python subclassing.
+customer:
+  id:      { source: "Id", transform: "stringify" }
+  name:    { source: "DisplayName" }
+  email:   { transform: "qbo_email" }
+  phone:   { transform: "qbo_phone" }
+  type:    { source: "__literal_customer__", default: "customer" }
+  address: { transform: "qbo_address" }
+
+vendor:
+  id:      { source: "Id", transform: "stringify" }
+  name:    { transform: "qbo_vendor_name" }
+  email:   { transform: "qbo_email" }
+  phone:   { transform: "qbo_phone" }
+  type:    { source: "__literal_supplier__", default: "supplier" }
+  address: { transform: "qbo_address" }
+
+account:
+  id:            { source: "Id", transform: "stringify" }
+  code:          { transform: "qbo_account_code" }
+  name:          { source: "Name" }
+  type:          { source: "AccountType" }
+  tax_type:      { source: "TaxCodeRef", transform: "qbo_ref_value" }
+  currency_code: { source: "CurrencyRef", transform: "qbo_ref_value" }

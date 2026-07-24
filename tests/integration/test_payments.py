@@ -1,71 +1,58 @@
 import pytest
 from fastapi.testclient import TestClient
 from main import app
-from routes.erp import get_adapter
+from routes import erp as erp_routes
+from adapters.xero import XeroAdapter
+from adapters.qbo import QBOAdapter
 
 client = TestClient(app)
+AUTH_HEADERS = {"X-ERP-Token": "Bearer test-token", "X-ERP-Tenant-Id": "tenant-123"}
 
-class MockPaymentsAdapter:
-    async def get_payments(self, token: str, tenant_id: str):
-        return [
-            {
-                "id": "pay-100",
-                "invoice_id": "inv-200",
-                "amount": 15000,
-                "date": "2026-06-29",
-                "account_code": "120",
-            }
-        ]
+SAMPLE_PAYMENT = {
+    "payment_id": "p-1",
+    "invoice_id": "inv-1",
+    "amount": 5000,
+    "date": "2026-07-01",
+    "status": "success",
+}
 
-    async def record_payment(self, token: str, tenant_id: str, data: dict):
-        return {
-            "success": True,
-            "payment_id": "pay-101",
-            "invoice_id": data["invoice_id"],
-            "amount": data["amount"],
-            "date": data["date"],
-        }
+RECORD_PAYMENT_PAYLOAD = {
+    "invoice_id": "inv-1",
+    "amount": 5000,
+    "date": "2026-07-01",
+    "account_code": "35",
+}
 
 
-def test_get_payments():
-    app.dependency_overrides[get_adapter] = lambda: MockPaymentsAdapter()
-    try:
-        response = client.get(
-            "/erp/payments",
-            headers={
-                "X-ERP-Token": "Bearer token",
-                "X-ERP-Tenant-Id": "tenant-123"
-            }
-        )
-        assert response.status_code == 200
-        res = response.json()
-        assert res["success"] is True
-        assert res["count"] == 1
-        assert res["data"][0]["id"] == "pay-100"
-    finally:
-        app.dependency_overrides.clear()
+@pytest.fixture(params=[XeroAdapter, QBOAdapter], ids=["xero", "qbo"])
+def adapter_class(request):
+    return request.param
 
 
-def test_post_payments():
-    app.dependency_overrides[get_adapter] = lambda: MockPaymentsAdapter()
-    try:
-        payload = {
-            "invoice_id": "inv-200",
-            "amount": 15000,
-            "date": "2026-06-29",
-            "account_code": "120",
-        }
-        response = client.post(
-            "/erp/payments",
-            headers={
-                "X-ERP-Token": "Bearer token",
-                "X-ERP-Tenant-Id": "tenant-123"
-            },
-            json=payload
-        )
-        assert response.status_code == 201
-        res = response.json()
-        assert res["success"] is True
-        assert res["data"]["payment_id"] == "pay-101"
-    finally:
-        app.dependency_overrides.clear()
+@pytest.fixture(autouse=True)
+def override_adapter(adapter_class):
+    app.dependency_overrides[erp_routes.get_adapter] = lambda: adapter_class()
+    yield
+    app.dependency_overrides.pop(erp_routes.get_adapter, None)
+
+
+def test_record_payment(monkeypatch, adapter_class):
+    async def mock_record_payment(self, token, tenant_id, data):
+        assert data["invoice_id"] == "inv-1"
+        assert data["amount"] == 5000
+        return SAMPLE_PAYMENT
+
+    monkeypatch.setattr(adapter_class, "record_payment", mock_record_payment)
+    response = client.post("/erp/payments", headers=AUTH_HEADERS, json=RECORD_PAYMENT_PAYLOAD)
+    assert response.status_code == 201
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["payment_id"] == "p-1"
+    assert body["data"]["status"] == "success"
+
+
+def test_record_payment_rejects_non_positive_amount(adapter_class):
+    bad_payload = {**RECORD_PAYMENT_PAYLOAD, "amount": 0}
+    response = client.post("/erp/payments", headers=AUTH_HEADERS, json=bad_payload)
+    assert response.status_code == 400
+    assert response.json()["success"] is False

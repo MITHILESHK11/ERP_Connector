@@ -1,7 +1,7 @@
 # ERP Connector
 
-> **Stateless REST microservice that acts as a universal wrapper around Xero and QuickBooks Online (QBO).**  
-> Internal services talk to one clean, ERP-agnostic API. The connector handles all ERP quirks internally.
+> **REST microservice that acts as a universal wrapper around Xero and QuickBooks Online (QBO).**  
+> Internal services talk to one clean, ERP-agnostic API. The connector handles all ERP quirks internally. It holds no business data (no database), but does include an optional local token cache — see notes below.
 
 ---
 
@@ -34,9 +34,25 @@ The ERP Connector receives requests from internal services, routes them to the c
 - Generates a `Correlation-ID` for every request for full traceability
 
 **What it does NOT do:**
-- Store any data (stateless, no database)
-- Hold, manage, or refresh OAuth tokens (caller owns credentials)
+- Store business data such as invoices/contacts/accounts (no database for ERP data)
 - Run background jobs or handle webhooks (future phase)
+
+**Note on tokens:** the connector includes `token_manager.py`, which persists and auto-refreshes OAuth tokens locally, plus `routes/auth.py`, which handles the entire login flow so you never hand-type a token into Swagger. One-time setup:
+
+1. Visit `/auth/setup` and paste in each ERP's Client ID / Client Secret (from the Xero/Intuit developer portal). Saved to a local, gitignored file — never `.env`, never committed.
+2. Visit `/auth/xero/login` and/or `/auth/qbo/login` once each, click "Allow" — done. Xero's Tenant ID and QBO's Realm ID are captured automatically from the OAuth redirect, no manual lookup needed.
+3. From then on, a background task (started in `main.py`'s lifespan) checks every couple of minutes whether either token is close to expiring and refreshes it proactively — no more logins needed until the refresh token itself expires (Xero: ~60 days if unused; QBO: 100 days).
+
+If you want the service to be fully stateless/credential-agnostic instead, always pass your own valid token per request via `X-ERP-Token` / `X-ERP-Tenant-Id` headers — the local token store is a convenience layer, not a requirement.
+
+**Standalone refresh, without the app running:** `scripts/refresh_xero_token.sh` and `scripts/refresh_qbo_token.sh` refresh a token with plain `curl` + `jq` — no Python, no browser, no running server required. Useful for a cron job, a quick manual check, or refreshing outside the app entirely. Both require the ERP to already be connected once via `/auth/{erp}/login` (that first step needs a browser for both ERPs — that's an OAuth requirement, not something either script can skip). **Important:** both Xero and QBO invalidate the old refresh token the moment a new one is issued — don't run these scripts *and* the app's background refresh loop against the same token file at the same time, or whichever refreshes second will fail with `invalid_grant`. Pick one mechanism as the source of truth (the background loop is fine for normal use; the scripts are for when the app isn't running).
+
+```bash
+./scripts/refresh_xero_token.sh   # refreshes .erp_tokens.json in place
+./scripts/refresh_qbo_token.sh
+```
+
+**Adding a new ERP:** normalization is config-driven — see `config/mappings/*.yaml` and `utils/field_mapper.py`. Most new fields are a plain rename in YAML; only genuinely ERP-specific logic (e.g. deriving a status QBO doesn't expose directly) needs a small named function in `utils/transforms.py`. The HTTP/auth/pagination layer still needs a thin adapter class per ERP, since that part is inherently ERP-specific network code, not configuration.
 
 ---
 
@@ -68,8 +84,8 @@ erp_connector/
 ├── adapters/
 │   ├── __init__.py                # Adapter registry — get_adapter() factory  ← Dev 1 ✅
 │   ├── base_adapter.py            # Abstract interface all adapters must implement  ← Dev 1 ✅
-│   ├── xero.py                    # Xero adapter implementation  ← Dev 2 ✅
-│   └── qbo.py                     # QBO adapter implementation  ← Dev 3 ✅
+│   ├── xero.py                    # Xero adapter implementation  ← Dev 2 🔄
+│   └── qbo.py                     # QBO adapter implementation  ← Dev 3 🔄
 │
 ├── config/
 │   ├── __init__.py
@@ -224,7 +240,6 @@ All endpoints require two custom headers (except `/erp/health`):
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/erp/payments` | List recorded payments |
 | `POST` | `/erp/payments` | Record a payment against an invoice or bill |
 
 ### Response Envelope
@@ -312,5 +327,5 @@ pytest -v
 
 ---
 
-*ERP Connector | Python FastAPI | June 2026*
+*ERP Connector — Phase 0 | Python FastAPI | June 2026*
 

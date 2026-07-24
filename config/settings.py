@@ -2,8 +2,8 @@ import os
 from functools import lru_cache
 from dotenv import load_dotenv
 
-# Load variables from .env file into environment
-load_dotenv()
+# Load variables from .env file into environment (override existing env vars)
+load_dotenv(override=True)
 
 class Settings:
     """
@@ -16,9 +16,9 @@ class Settings:
         if erp_type_raw == "qbo":
             erp_type_raw = "quickbooks"
             
-        if erp_type_raw not in ("xero", "quickbooks"):
+        if erp_type_raw not in ("xero", "quickbooks", "mock"):
             raise ValueError(
-                f"ERP_TYPE must be set to 'xero' or 'quickbooks' (or 'qbo') in environment config. Got: {os.getenv('ERP_TYPE')}"
+                f"ERP_TYPE must be set to 'xero', 'quickbooks' (or 'qbo'), or 'mock' in environment config. Got: {os.getenv('ERP_TYPE')}"
             )
         
         self.ERP_TYPE: str = erp_type_raw

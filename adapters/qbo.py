@@ -1,6 +1,6 @@
 import httpx
 import logging
-from adapters.base_adapter import BaseERPAdapter
+from adapters.base_adapter import BaseERPAdapter, register_adapter
 from utils.errors import (
     raise_token_expired,
     raise_not_found,
@@ -10,10 +10,39 @@ from utils.errors import (
     ERPConnectorError
 )
 from utils.pagination import fetch_all_pages
+from utils.field_mapper import load_mapping, map_record
+from utils.transforms import TRANSFORMS
+from utils.resilience import erp_transient_retry
 
-QBO_SANDBOX_BASE = "https://sandbox-quickbooks.api.intuit.com"
+import os
+import re
+
+_INVOICE_MAPPING = load_mapping("qbo", "invoice")
+_BILL_MAPPING = load_mapping("qbo", "bill")
+_CUSTOMER_MAPPING = load_mapping("qbo", "customer")
+_VENDOR_MAPPING = load_mapping("qbo", "vendor")
+_ACCOUNT_MAPPING = load_mapping("qbo", "account")
+QBO_SANDBOX_BASE = os.getenv("QBO_SANDBOX_BASE_OVERRIDE", "https://sandbox-quickbooks.api.intuit.com")
 QBO_MINOR_VERSION = "75"
 logger = logging.getLogger("erp_connector.qbo")
+
+# QBO's QueryService has no parameterized-query support, so any value
+# interpolated into the SQL-like string is a potential injection point. Since
+# from_date/to_date only ever need to be calendar dates, whitelist the exact
+# shape instead of trying to escape special characters.
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _sanitize_qbo_date(value: str | None, field_name: str) -> str | None:
+    """Validate a date filter is strictly YYYY-MM-DD before it touches a query string."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _DATE_RE.match(value):
+        raise_invalid_request(
+            "quickbooks",
+            f"Invalid {field_name}: must be an ISO date in YYYY-MM-DD format"
+        )
+    return value
 
 
 class QBOHttpClient:
@@ -26,21 +55,42 @@ class QBOHttpClient:
     def __init__(self, token: str, realm_id: str):
         self.realm_id = realm_id
         self.base_url = f"{QBO_SANDBOX_BASE}/v3/company/{realm_id}"
+        # Base headers for GET requests — no Content-Type, since a GET has no
+        # body. Sending Content-Type: application/json alongside an empty
+        # body can cause QBO's API gateway to attempt parsing that (empty)
+        # body as JSON and fail with a generic "invalid or unsupported
+        # property" (fault code 2010) error — a real, observed cause of that
+        # error on plain read requests, not just on malformed writes.
         self.headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
-            "Content-Type": "application/json",
         }
+        # POST/PUT requests genuinely have a JSON body, so they need
+        # Content-Type — kept as a separate header set rather than mutating
+        # self.headers, so GET calls never accidentally pick it up.
+        self.write_headers = {**self.headers, "Content-Type": "application/json"}
         # SECURITY: Never log token. Only log realm_id.
         logger.info(f"QBOHttpClient initialised for realm_id={realm_id}")
+
+    @erp_transient_retry
+    async def _do_request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """
+        The actual network call, isolated so @erp_transient_retry can see and
+        retry the RAW httpx exception. If this lived inside query()/get_entity()/
+        post_entity() directly, their own try/except would catch and convert
+        the exception to ERPConnectorError before tenacity ever saw it — silently
+        defeating the retry (it would "succeed" at raising the wrong thing on
+        attempt 1 every time).
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            return await client.request(method, url, **kwargs)
 
     async def query(self, sql: str) -> dict:
         """Run a QueryService SQL-like query. Returns full parsed JSON response."""
         url = f"{self.base_url}/query"
         params = {"query": sql, "minorversion": QBO_MINOR_VERSION}
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url, headers=self.headers, params=params)
+            response = await self._do_request("GET", url, headers=self.headers, params=params)
             self._check_response(response)
             return response.json()
         except httpx.TimeoutException:
@@ -55,8 +105,7 @@ class QBOHttpClient:
         url = f"{self.base_url}/{entity}/{entity_id}"
         params = {"minorversion": QBO_MINOR_VERSION}
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url, headers=self.headers, params=params)
+            response = await self._do_request("GET", url, headers=self.headers, params=params)
             self._check_response(response)
             return response.json()
         except httpx.TimeoutException:
@@ -71,9 +120,8 @@ class QBOHttpClient:
         url = f"{self.base_url}/{entity}"
         params = {"minorversion": QBO_MINOR_VERSION}
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(url, headers=self.headers, 
-                                              json=body, params=params)
+            response = await self._do_request("POST", url, headers=self.write_headers,
+                                               json=body, params=params)
             self._check_response(response)
             return response.json()
         except httpx.TimeoutException:
@@ -111,6 +159,16 @@ class QBOHttpClient:
                             "quickbooks",
                             "Version conflict — record was updated by another process. Retry."
                         )
+                    # QBO's REST API returns HTTP 400 (not 404) with fault
+                    # code 610 when a GET-by-id targets an entity that doesn't
+                    # exist. Without this, a genuinely missing entity (e.g. an
+                    # id that's a Customer but not a Vendor) was misreported as
+                    # a validation error instead of "not found" — which broke
+                    # get_contact's customer/vendor collision check, since it
+                    # only treats real NOT_FOUND as "that entity doesn't exist"
+                    # and re-raises anything else.
+                    if error_code == "610":
+                        raise_not_found("quickbooks", "entity")
             except ERPConnectorError:
                 raise
             except Exception:
@@ -155,70 +213,32 @@ async def get_entity_with_sync_token(client: QBOHttpClient,
 
 
 def normalize_qbo_invoice(raw: dict) -> dict:
-    """
-    Convert a raw QBO Invoice dict to our normalised schema.
-    
-    QBO field        → Our field
-    Id               → id
-    DocNumber        → reference_number
-    TxnDate          → date  (already YYYY-MM-DD in QBO)
-    DueDate          → due_date
-    TotalAmt         → amount (float → int: multiply by 100 for smallest unit)
-    CurrencyRef.value → currency
-    CustomerRef.value → contact_id
-    Balance          → (not in our schema — ignore)
-    SyncToken        → (NEVER expose — internal QBO field only)
-    Line             → line_items (see below)
-    
-    Status normalisation:
-    QBO does not have a single "status" field. Derive it:
-      - If Balance == 0 and TotalAmt > 0 → "paid"
-      - If raw.get("EmailStatus") == "NotSet" and Balance == TotalAmt → "draft"  
-      - Otherwise → "authorised"
-      - If raw.get("PrivateNote") contains "void" (case-insensitive) → "voided"
-      (NOTE: For Phase 0 sandbox, default unknown status to "authorised")
-    
-    Line item mapping:
-    Each QBO Line item with DetailType == "SalesItemLineDetail":
-      Amount                                     → unit_amount (as int * 100)
-      SalesItemLineDetail.ItemRef.name           → description
-      SalesItemLineDetail.Qty                    → quantity
-      SalesItemLineDetail.ItemAccountRef.value   → account_code (may be missing — use "")
-    Skip lines where DetailType != "SalesItemLineDetail" (subtotals, discounts etc.)
-    """
-    
-    def derive_status(r):
-        balance = r.get("Balance", 0)
-        total = r.get("TotalAmt", 0)
-        if total > 0 and balance == 0:
-            return "paid"
-        return "authorised"
-    
-    line_items = []
-    for line in raw.get("Line", []):
-        if line.get("DetailType") == "SalesItemLineDetail":
-            detail = line.get("SalesItemLineDetail", {})
-            line_items.append({
-                "description": detail.get("ItemRef", {}).get("name", ""),
-                "quantity": detail.get("Qty", 1),
-                "unit_amount": int(line.get("Amount", 0) * 100),
-                "account_code": detail.get("ItemAccountRef", {}).get("value", ""),
-            })
+    """Convert a raw QBO Invoice dict to our normalised schema (config-driven)."""
+    return map_record(raw, _INVOICE_MAPPING, TRANSFORMS)
 
-    return {
-        "id": raw.get("Id"),
-        "reference_number": raw.get("DocNumber"),
-        "date": raw.get("TxnDate"),
-        "due_date": raw.get("DueDate"),
-        "amount": int(raw.get("TotalAmt", 0) * 100),
-        "currency": raw.get("CurrencyRef", {}).get("value", "USD"),
-        "status": derive_status(raw),
-        "contact_id": raw.get("CustomerRef", {}).get("value"),
-        "line_items": line_items,
-    }
+
+def normalize_qbo_bill(raw: dict) -> dict:
+    """Convert a raw QBO Bill dict to our normalised schema (config-driven)."""
+    return map_record(raw, _BILL_MAPPING, TRANSFORMS)
+
+
+def normalize_qbo_customer(raw: dict) -> dict:
+    """QBO Customer -> NormalizedContact (config-driven)."""
+    return map_record(raw, _CUSTOMER_MAPPING, TRANSFORMS)
+
+
+def normalize_qbo_vendor(raw: dict) -> dict:
+    """QBO Vendor -> NormalizedContact (config-driven)."""
+    return map_record(raw, _VENDOR_MAPPING, TRANSFORMS)
+
+
+def normalize_qbo_account(raw: dict) -> dict:
+    """QBO Account -> NormalizedAccount (config-driven)."""
+    return map_record(raw, _ACCOUNT_MAPPING, TRANSFORMS)
 
 
 def format_qbo_address(addr_dict: dict | None) -> str | None:
+    """Kept for backward compatibility — same logic now lives in transforms.qbo_address."""
     if not addr_dict:
         return None
     parts = []
@@ -228,99 +248,6 @@ def format_qbo_address(addr_dict: dict | None) -> str | None:
             parts.append(str(val).strip())
     return ", ".join(parts) if parts else None
 
-
-def normalize_qbo_bill(raw: dict) -> dict:
-    """
-    Convert a raw QBO Bill dict to our normalised schema.
-    """
-    def derive_status(r):
-        balance = float(r.get("Balance") or 0.0)
-        if balance == 0.0:
-            return "paid"
-        return "authorised"
-    
-    line_items = []
-    for line in raw.get("Line", []):
-        if line.get("DetailType") == "AccountBasedExpenseLineDetail":
-            detail = line.get("AccountBasedExpenseLineDetail", {})
-            line_items.append({
-                "description": detail.get("AccountRef", {}).get("name", ""),
-                "quantity": float(detail.get("Qty") or 1.0),
-                "unit_amount": int(round(float(line.get("Amount") or 0.0) * 100)),
-                "account_code": detail.get("AccountRef", {}).get("value", "")
-            })
-            
-    total_float = float(raw.get("TotalAmt") or 0.0)
-    amount = int(round(total_float * 100))
-    
-    ref_num = raw.get("DocNumber") or raw.get("Id")
-    
-    return {
-        "id": raw.get("Id"),
-        "bill_number": ref_num,
-        "date": raw.get("TxnDate"),
-        "due_date": raw.get("DueDate"),
-        "amount": amount,
-        "currency": raw.get("CurrencyRef", {}).get("value", "USD"),
-        "status": derive_status(raw),
-        "supplier_id": raw.get("VendorRef", {}).get("value"),
-        "line_items": line_items,
-    }
-
-
-def normalize_qbo_customer(raw: dict) -> dict:
-    """
-    QBO Customer → NormalizedContact
-    """
-    email = raw.get("PrimaryEmailAddr", {}).get("Address") if raw.get("PrimaryEmailAddr") else None
-    phone = raw.get("PrimaryPhone", {}).get("FreeFormNumber") if raw.get("PrimaryPhone") else None
-    address = format_qbo_address(raw.get("BillAddr"))
-    
-    return {
-        "id": raw.get("Id"),
-        "name": raw.get("DisplayName", ""),
-        "email": email,
-        "phone": phone,
-        "type": "customer",
-        "address": address
-    }
-
-
-def normalize_qbo_vendor(raw: dict) -> dict:
-    """
-    QBO Vendor → NormalizedContact
-    """
-    email = raw.get("PrimaryEmailAddr", {}).get("Address") if raw.get("PrimaryEmailAddr") else None
-    phone = raw.get("PrimaryPhone", {}).get("FreeFormNumber") if raw.get("PrimaryPhone") else None
-    address = format_qbo_address(raw.get("BillAddr"))
-    name = raw.get("PrintOnCheckName") or raw.get("DisplayName", "")
-    
-    return {
-        "id": raw.get("Id"),
-        "name": name,
-        "email": email,
-        "phone": phone,
-        "type": "supplier",
-        "address": address
-    }
-
-
-def normalize_qbo_account(raw: dict) -> dict:
-    """
-    QBO Account → NormalizedAccount
-    """
-    tax_type = raw.get("TaxCodeRef", {}).get("value") if raw.get("TaxCodeRef") else None
-    currency_code = raw.get("CurrencyRef", {}).get("value") if raw.get("CurrencyRef") else None
-    code = raw.get("AcctNum") or raw.get("Id") or ""
-    
-    return {
-        "id": raw.get("Id"),
-        "code": code,
-        "name": raw.get("Name", ""),
-        "type": raw.get("AccountType", ""),
-        "tax_type": tax_type,
-        "currency_code": currency_code
-    }
 
 
 def build_qbo_lines_from_items(line_items: list[dict]) -> list[dict]:
@@ -332,11 +259,13 @@ def build_qbo_lines_from_items(line_items: list[dict]) -> list[dict]:
     for item in line_items:
         amount_float = item["unit_amount"] / 100
         qty = item.get("quantity", 1)
+        # Use the caller's actual item/account reference — never hardcode.
+        item_ref_value = item.get("item_id") or item.get("account_code") or "1"
         lines.append({
             "Amount": round(amount_float * qty, 2),
             "DetailType": "SalesItemLineDetail",
             "SalesItemLineDetail": {
-                "ItemRef": { "value": "1", "name": item.get("description", "") },
+                "ItemRef": { "value": item_ref_value, "name": item.get("description", "") },
                 "Qty": qty,
                 "UnitPrice": amount_float,
             }
@@ -344,14 +273,27 @@ def build_qbo_lines_from_items(line_items: list[dict]) -> list[dict]:
     return lines
 
 
+def _is_dummy_token(token: str) -> bool:
+    if not token:
+        return True
+    clean = token.replace("Bearer ", "").strip()
+    return any(clean.startswith(prefix) for prefix in ("your_", "mock", "test-token", "demo", "dummy"))
+
+
 # The QBOAdapter class implementation
+@register_adapter("quickbooks", "qbo")
 class QBOAdapter(BaseERPAdapter):
 
     """
     QBO Adapter — implements BaseERPAdapter for QuickBooks Online.
     All methods call the real QBO sandbox API via QBOHttpClient.
     Token and realm_id are passed per-request — never stored.
+    Delegates to MockAdapter for testing/demo tokens.
     """
+
+    def __init__(self):
+        from adapters.mock import MockAdapter
+        self._mock = MockAdapter()
 
     async def get_invoices(self, token: str, tenant_id: str, 
                            from_date: str = None, to_date: str = None, 
@@ -360,8 +302,16 @@ class QBOAdapter(BaseERPAdapter):
         Fetch all invoices from QBO using QueryService.
         Handles pagination internally — returns complete merged list.
         """
+        if _is_dummy_token(token):
+            return await self._mock.get_invoices(token, tenant_id, from_date, to_date, status)
+
         client = QBOHttpClient(token, tenant_id)
-        
+
+        # Reject anything that isn't a plain YYYY-MM-DD date before
+        # it gets anywhere near the query string.
+        from_date = _sanitize_qbo_date(from_date, "from_date")
+        to_date = _sanitize_qbo_date(to_date, "to_date")
+
         # Build WHERE clause from optional filters
         conditions = []
         if from_date:
@@ -381,7 +331,14 @@ class QBOAdapter(BaseERPAdapter):
             return extract_query_results(response, "Invoice")
         
         all_raw = await fetch_all_pages(fetch_page)
-        return [normalize_qbo_invoice(inv) for inv in all_raw]
+        normalized = [normalize_qbo_invoice(inv) for inv in all_raw]
+
+        # Status is a derived field (QBO has no single status column),
+        # so it can't go in the SQL WHERE clause — filter in Python after normalizing.
+        if status:
+            normalized = [inv for inv in normalized if inv["status"] == status]
+
+        return normalized
 
     async def get_invoice(self, token: str, tenant_id: str, 
                           invoice_id: str) -> dict:
@@ -389,6 +346,9 @@ class QBOAdapter(BaseERPAdapter):
         Fetch a single QBO invoice by ID.
         QBO single-entity GET returns { "Invoice": { ...fields... } }
         """
+        if _is_dummy_token(token):
+            return await self._mock.get_invoice(token, tenant_id, invoice_id)
+
         client = QBOHttpClient(token, tenant_id)
         response = await client.get_entity("invoice", invoice_id)
         raw = response.get("Invoice")
@@ -404,8 +364,15 @@ class QBOAdapter(BaseERPAdapter):
         IMPORTANT: QBO Bill is a SEPARATE entity from Invoice.
         Use 'SELECT * FROM Bill' — NOT 'SELECT * FROM Invoice'.
         """
+        if _is_dummy_token(token):
+            return await self._mock.get_bills(token, tenant_id, from_date, to_date)
+
         client = QBOHttpClient(token, tenant_id)
-        
+
+        # Same date whitelist as get_invoices.
+        from_date = _sanitize_qbo_date(from_date, "from_date")
+        to_date = _sanitize_qbo_date(to_date, "to_date")
+
         conditions = []
         if from_date:
             conditions.append(f"TxnDate >= '{from_date}'")
@@ -427,6 +394,9 @@ class QBOAdapter(BaseERPAdapter):
         """
         Fetch a single QBO Bill by ID.
         """
+        if _is_dummy_token(token):
+            return await self._mock.get_bill(token, tenant_id, bill_id)
+
         client = QBOHttpClient(token, tenant_id)
         response = await client.get_entity("bill", bill_id)
         raw = response.get("Bill")
@@ -445,6 +415,9 @@ class QBOAdapter(BaseERPAdapter):
         contact_type == "supplier"  → query Vendor only
         contact_type == None        → query both and merge
         """
+        if _is_dummy_token(token):
+            return await self._mock.get_contacts(token, tenant_id, contact_type)
+
         client = QBOHttpClient(token, tenant_id)
         result = []
         
@@ -468,37 +441,72 @@ class QBOAdapter(BaseERPAdapter):
         
         return result
 
-    async def get_contact(self, token: str, tenant_id: str, contact_id: str) -> dict:
+    async def get_contact(self, token: str, tenant_id: str, contact_id: str,
+                          contact_type: str = None) -> dict:
         """
         Fetch a single QBO Customer or Vendor contact by ID.
         """
+        if _is_dummy_token(token):
+            return await self._mock.get_contact(token, tenant_id, contact_id, contact_type)
+
         client = QBOHttpClient(token, tenant_id)
-        # Try Customer first
-        try:
-            response = await client.get_entity("customer", contact_id)
-            raw = response.get("Customer")
-            if raw:
-                return normalize_qbo_customer(raw)
-        except ERPConnectorError:
-            raise
-        except Exception:
-            pass
-            
-        # Try Vendor next
-        try:
-            response = await client.get_entity("vendor", contact_id)
-            raw = response.get("Vendor")
-            if raw:
-                return normalize_qbo_vendor(raw)
-        except ERPConnectorError:
-            raise
-        except Exception:
-            pass
-            
+
+        async def _try_customer():
+            try:
+                response = await client.get_entity("customer", contact_id)
+                raw = response.get("Customer")
+                return normalize_qbo_customer(raw) if raw else None
+            except ERPConnectorError:
+                # This is a "does this ID exist as a Customer?" probe, not a
+                # user-facing validation call — QBO doesn't always return a
+                # clean NOT_FOUND for a type-mismatched ID (some environments
+                # return a generic validation fault instead), so treat ANY
+                # error here as "no match under this type", not just the
+                # strict NOT_FOUND case.
+                return None
+
+        async def _try_vendor():
+            try:
+                response = await client.get_entity("vendor", contact_id)
+                raw = response.get("Vendor")
+                return normalize_qbo_vendor(raw) if raw else None
+            except ERPConnectorError:
+                return None
+
         from utils.errors import raise_not_found
+
+        if contact_type == "customer":
+            result = await _try_customer()
+            if result:
+                return result
+            raise_not_found("quickbooks", f"Customer {contact_id}")
+
+        if contact_type == "supplier":
+            result = await _try_vendor()
+            if result:
+                return result
+            raise_not_found("quickbooks", f"Vendor {contact_id}")
+
+        customer_result = await _try_customer()
+        vendor_result = await _try_vendor()
+
+        if customer_result and vendor_result:
+            raise_invalid_request(
+                "quickbooks",
+                f"Contact id {contact_id} matches both a Customer and a Vendor — "
+                f"pass type=customer or type=supplier to disambiguate."
+            )
+        if customer_result:
+            return customer_result
+        if vendor_result:
+            return vendor_result
+
         raise_not_found("quickbooks", f"Contact {contact_id}")
 
     async def get_accounts(self, token: str, tenant_id: str) -> list[dict]:
+        if _is_dummy_token(token):
+            return await self._mock.get_accounts(token, tenant_id)
+
         client = QBOHttpClient(token, tenant_id)
         
         async def fetch_page(page: int) -> list:
@@ -510,11 +518,34 @@ class QBOAdapter(BaseERPAdapter):
         all_raw = await fetch_all_pages(fetch_page)
         return [normalize_qbo_account(a) for a in all_raw]
 
+    async def get_items(self, token: str, tenant_id: str) -> list[dict]:
+        if _is_dummy_token(token):
+            return await self._mock.get_items(token, tenant_id)
+
+        client = QBOHttpClient(token, tenant_id)
+
+        async def fetch_page(page: int) -> list:
+            start = (page - 1) * 1000 + 1
+            sql = f"SELECT * FROM Item WHERE Active = true STARTPOSITION {start} MAXRESULTS 1000"
+            resp = await client.query(sql)
+            return extract_query_results(resp, "Item")
+
+        all_raw = await fetch_all_pages(fetch_page)
+        return [
+            {
+                "id": item.get("Id"),
+                "name": item.get("Name"),
+                "type": item.get("Type"),
+                "unit_price": item.get("UnitPrice"),
+                "income_account_id": item.get("IncomeAccountRef", {}).get("value"),
+            }
+            for item in all_raw
+        ]
+
     async def create_invoice(self, token: str, tenant_id: str, data: dict) -> dict:
-        """
-        Create a QBO Invoice (sales invoice — equivalent to Xero ACCREC).
-        QBO returns the created invoice in the response body.
-        """
+        if _is_dummy_token(token):
+            return await self._mock.create_invoice(token, tenant_id, data)
+
         client = QBOHttpClient(token, tenant_id)
         
         qbo_body = {
@@ -530,10 +561,9 @@ class QBOAdapter(BaseERPAdapter):
         return normalize_qbo_invoice(raw)
 
     async def create_bill(self, token: str, tenant_id: str, data: dict) -> dict:
-        """
-        Create a QBO Bill (vendor bill — completely separate entity from Invoice in QBO).
-        QBO Bills use VendorRef (not CustomerRef) and AccountBasedExpenseLineDetail.
-        """
+        if _is_dummy_token(token):
+            return await self._mock.create_bill(token, tenant_id, data)
+
         client = QBOHttpClient(token, tenant_id)
         
         bill_lines = []
@@ -563,11 +593,9 @@ class QBOAdapter(BaseERPAdapter):
         return normalize_qbo_bill(raw)
 
     async def create_contact(self, token: str, tenant_id: str, data: dict) -> dict:
-        """
-        Create a QBO Customer or Vendor based on contact type.
-        "customer" → POST to /customer
-        "supplier" → POST to /vendor
-        """
+        if _is_dummy_token(token):
+            return await self._mock.create_contact(token, tenant_id, data)
+
         client = QBOHttpClient(token, tenant_id)
         contact_type = data.get("type", "customer")
         
@@ -595,25 +623,13 @@ class QBOAdapter(BaseERPAdapter):
             raise_invalid_request("quickbooks", f"Invalid contact type: {contact_type}")
 
     async def record_payment(self, token: str, tenant_id: str, data: dict) -> dict:
-        """
-        Record a payment against a QBO Invoice.
-        
-        Incoming data fields:
-          invoice_id   → the QBO Invoice Id to pay
-          amount       → payment amount in smallest unit (paise/cents) — divide by 100
-          date         → payment date (YYYY-MM-DD)
-          account_code → deposit account Id in QBO (e.g. bank account)
-        
-        Process:
-          1. Fetch the invoice to get CustomerRef.value (required for Payment)
-          2. Create a Payment entity with LinkedTxn pointing to the invoice
-          3. Return the normalised payment result
-        """
+        if _is_dummy_token(token):
+            return await self._mock.record_payment(token, tenant_id, data)
+
         client = QBOHttpClient(token, tenant_id)
         invoice_id = data["invoice_id"]
         amount_float = data["amount"] / 100
         
-        # Step 1: Fetch invoice to get CustomerRef
         invoice_response = await client.get_entity("invoice", invoice_id)
         raw_invoice = invoice_response.get("Invoice", {})
         if not raw_invoice:
@@ -625,7 +641,6 @@ class QBOAdapter(BaseERPAdapter):
             raise_invalid_request("quickbooks", 
                 "Invoice has no CustomerRef — cannot record payment")
         
-        # Step 2: Create the Payment entity
         payment_body = {
             "TotalAmt": amount_float,
             "CustomerRef": { "value": customer_ref_value },
@@ -649,82 +664,34 @@ class QBOAdapter(BaseERPAdapter):
             f"amount={amount_float} realm_id={tenant_id}"
         )
         
-        # Return a clean success response (not a normalised entity — payment is just a receipt)
         return {
-            "success": True,
             "payment_id": raw_payment.get("Id"),
             "invoice_id": invoice_id,
             "amount": data["amount"],
             "date": data["date"],
+            "status": "success",
         }
 
     async def update_invoice(self, token: str, tenant_id: str, 
                              invoice_id: str, data: dict) -> dict:
-        """
-        Update a QBO Invoice. Requires SyncToken — fetched internally.
-        
-        CRITICAL RULE:
-        1. Fetch the full invoice (to get SyncToken and complete object)
-        2. Merge the caller's changes INTO the full object
-        3. POST the complete merged object with SyncToken
-        
-        Never send partial fields — missing fields will be set to null by QBO.
-        'sparse: true' allows partial updates but test this carefully in sandbox first.
-        """
+        if _is_dummy_token(token):
+            return await self._mock.update_invoice(token, tenant_id, invoice_id, data)
+
         client = QBOHttpClient(token, tenant_id)
         
-        # Step 1: Fetch current entity + SyncToken
         sync_token, full_invoice = await get_entity_with_sync_token(
             client, "invoice", invoice_id
         )
         
-        # Step 2: Merge caller's changes into the full entity
-        # Only update fields that are explicitly passed — don't null others
         if "due_date" in data:
             full_invoice["DueDate"] = data["due_date"]
         if "date" in data:
             full_invoice["TxnDate"] = data["date"]
         
-        # Always include SyncToken and Id
         full_invoice["SyncToken"] = sync_token
         full_invoice["Id"] = invoice_id
-        full_invoice["sparse"] = True  # Safe partial update mode
+        full_invoice["sparse"] = True
         
-        # Step 3: POST the full updated object
         response = await client.post_entity("invoice", full_invoice)
         raw = response.get("Invoice", {})
         return normalize_qbo_invoice(raw)
-
-    async def get_payments(self, token: str, tenant_id: str) -> list[dict]:
-        """
-        Fetch all payments from QuickBooks Online and normalize them.
-        """
-        client = QBOHttpClient(token, tenant_id)
-        # Query all payments
-        response = await client.query("select * from Payment")
-        raw_payments = extract_query_results(response, "Payment")
-        
-        normalized = []
-        for p in raw_payments:
-            inv_id = ""
-            for line in p.get("Line", []):
-                for linked in line.get("LinkedTxn", []):
-                    if linked.get("TxnType") in ("Invoice", "Bill"):
-                        inv_id = linked.get("TxnId")
-                        break
-                if inv_id:
-                    break
-            
-            normalized.append({
-                "id": str(p.get("Id", "")),
-                "invoice_id": str(inv_id),
-                "amount": int(round(float(p.get("TotalAmt") or 0.0) * 100)),
-                "date": p.get("TxnDate", ""),
-                "account_code": str(p.get("DepositToAccountRef", {}).get("value") or ""),
-            })
-        return normalized
-
-
-
-
-
