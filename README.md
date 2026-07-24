@@ -2,7 +2,6 @@
 
 > **REST microservice that acts as a universal wrapper around Xero and QuickBooks Online (QBO).**
 > Internal services talk to one clean, ERP-agnostic API. The connector handles all ERP quirks internally — authentication, pagination, rate limits, and field normalization — so callers write one integration instead of two.
-
 ---
 
 ## Table of Contents
