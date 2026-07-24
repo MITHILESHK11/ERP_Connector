@@ -17,7 +17,6 @@
 9. [Adding a New ERP](#adding-a-new-erp)
 10. [Running Tests](#running-tests)
 11. [Current Build Status](#current-build-status)
-12. [Known Limitations & Future Work](#known-limitations--future-work)
 
 ---
 
@@ -327,16 +326,4 @@ pyflakes .
 | Test suite | 104/104 passing |
 
 ---
-
-## Known Limitations & Future Work
-
-- **No database** — by design; this is a stateless pass-through, not a system of record.
-- **No webhooks** — pull-only REST interface today; push-based event ingestion would be a separate feature.
-- **Xero doesn't yet share QBO's centralized retry-wrapped HTTP client** — QBO funnels all calls through one class, making retry-wrapping safe and complete; Xero has more scattered call sites, so retry coverage there is partial.
-- **Token refresh uses a blocking HTTP call run in a thread pool**, not a fully async client — acceptable at current scale, worth revisiting under heavy concurrent load.
-- **Single-instance token storage** — tokens live in a local file, correct for one running instance. A Redis/Vault-backed token store would only be needed for multi-instance deployment.
-- **Reverse (write-direction) YAML mapping** — reads are fully config-driven; write payloads are still adapter-specific Python. A worthwhile future refactor, deferred to avoid risking currently-working, tested code.
-
----
-
 *ERP Connector — Python 3.12, FastAPI, July 2026*
