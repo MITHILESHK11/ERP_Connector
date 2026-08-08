@@ -39,6 +39,11 @@ The ERP Connector receives requests from internal services, routes them to the c
 - Push/receive webhooks (pull-only REST interface; a future enhancement, not current scope)
 
 ---
+## High-Level Architecture Diagram
+
+![High-Level Architecture Diagram](docs/images/erp_connector_diagram_1.jpg)
+
+---
 
 ## Tech Stack
 
